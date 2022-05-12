@@ -10,16 +10,16 @@ extern "C" {
 
 #define LOGGER_ID_MAX_IDS   20
 
-int logger_id_init();
-int logger_id_free();
+int lgi_init();
+int lgi_free();
 
-int logger_id_add_id(char* p_sID);
-int logger_id_get_id(logger_id id_ref, char* dest);
-int logger_id_remove_id(logger_id id_ref);
+int lgi_add_id(char* p_sID);
+int lgi_get_id(logger_id id_ref, char* dest);
+int lgi_remove_id(logger_id id_ref);
 
-logger_id logger_id_add_id(char* p_sId);
+logger_id lgi_add_id(char* p_sId);
 
-int logger_id_get_longest_len();
+int lgi_get_longest_len();
 
 #ifdef __cplusplus
 }

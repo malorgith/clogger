@@ -14,7 +14,7 @@ extern "C" {
  *
  * A threaded logger that places an emphasis on minimizing the
  * time spent by the calling thread when logging a message.
- * 
+ *
  */
 
 #ifndef _POSIX_C_SOURCE
@@ -47,6 +47,10 @@ extern "C" {
 
 #ifndef CLOGGER_MAX_NUM_HANDLERS
 #define CLOGGER_MAX_NUM_HANDLERS 5
+#endif
+
+#ifndef CLOGGER_BUFFER_SIZE
+#define CLOGGER_BUFFER_SIZE 50
 #endif
 
 /*
@@ -87,23 +91,19 @@ int logger_print_id(logger_id id_ref); // TODO consider moving to non-public or 
 int logger_remove_id(logger_id id_ref);
 
 
-// ################ Formatter Code ################
-typedef uint8_t logger_formatter_id;
-logger_formatter_id logger_create_formatter();
-
 
 // ################ Logger Code ################
 
 /*!
  * Initializes variables and starts the logger thread.
- * 
+ *
  */
 bool logger_init(int p_nLogLevel);
 
 /*!
  * Tells the logger thread it's time to exit, then frees any
  * used memory.
- * 
+ *
  */
 bool logger_free();
 

@@ -8,23 +8,23 @@ extern "C" {
 
 #include "logger_msg.h"
 
-int logger_buffer_init();
+int lgb_init();
 
-int logger_buffer_free();
+int lgb_free();
 
-int logger_buffer_create_buffer();
+int lgb_create_buffer();
 
-int logger_buffer_free_buffer(int bufref);
+int lgb_remove_buffer(int bufref);
 
-int logger_buffer_add_message(int bufref, t_loggermsg* msg);
+int lgb_add_message(int bufref, t_loggermsg* msg);
 
-t_loggermsg* logger_buffer_read_message(int bufref);
+t_loggermsg* lgb_read_message(int bufref);
 
-int logger_buffer_wait_for_messages(int bufref, int seconds_to_wait);
+int lgb_wait_for_messages(int bufref, int seconds_to_wait);
 
-int logger_buffer_add_to_time(struct timespec *p_pTspec, int ms_to_add, int min_ms, int max_ms);
+int lgb_add_to_time(struct timespec *p_pTspec, int ms_to_add, int min_ms, int max_ms);
 
-#ifdef TESTING_FUNCTIONS_ENABLED
+#ifndef NDEBUG
 /*!
  * Returns the value of BUFFER_SIZE.
  *

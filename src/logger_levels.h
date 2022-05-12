@@ -7,6 +7,7 @@ extern "C" {
 #endif
 
 #include "clogger.h"
+#include "logger_util.h"
 
 extern const char* lgl_lchars[];
 extern const char* lgl_uchars[];

@@ -10,7 +10,7 @@ extern "C" {
  *
  * A threaded logger that places an emphasis on minimizing the
  * time spent sending a message.
- * 
+ *
  */
 
 #include "logger_handler.h"
@@ -20,7 +20,7 @@ extern "C" {
 
 #define LOGGER_MAX_NUM_FORMATTERS   5
 
-#ifdef TESTING_FUNCTIONS_ENABLED
+#ifndef NDEBUG
 /*!
  * Returns the value of g_nBufferReadIndex.
  *
@@ -37,8 +37,6 @@ int logger_get_add_index();
 
 bool logger_test_stop_logger();
 bool custom_test_logger_large_add_message();
-void *stress_test_logger(void *arg);
-bool logger_run_stress_test(int p_nThreads, int p_nMessages);
 #endif
 
 #endif

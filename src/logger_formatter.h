@@ -29,6 +29,7 @@ typedef struct {
     int             obj_not_init;
 } logger_formatter;
 
+// TODO implement or remove items below
 //extern const char* lgf_date_only;
 //extern const char* lgf_time_only;
 //extern const char* g_sDefaultDateFormat;
@@ -45,6 +46,7 @@ int lgf_set_time_only(logger_formatter* formatobj);
 
 
 /*
+ * TODO implement or remove functions below
 int lgf_get_format(char* p_sString, logger_formatter* formatobj);
 int lgf_get_format_no_date(char* p_sString, logger_formatter* formatobj);
 

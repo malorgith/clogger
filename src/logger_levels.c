@@ -3,6 +3,8 @@
 
 #include <string.h>
 
+// global vars
+
 /*
  * Note that the 'chars' are actually strings. This is to make it so
  * '%s' can consistently be used in formatters to output the value.
@@ -51,13 +53,14 @@ const char* lgl_ustrs[] = {
     "DEBUG"
 };
 
+// public functions
 int lgl_check(int log_level) {
     if (log_level < 0) {
-        fprintf(stderr, "Log level is less than 0.\n");
+        lgu_warn_msg("log level is less than 0");
         return 1;
     }
     else if (log_level > LOGGER_MAX_LEVEL) {
-        fprintf(stderr, "Log level is greater than max level '%d'\n", LOGGER_MAX_LEVEL);
+        lgu_warn_msg_int("log level is greater than max level '%d'", LOGGER_MAX_LEVEL);
         return 1;
     }
     return 0;

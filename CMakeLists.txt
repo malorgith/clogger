@@ -18,7 +18,7 @@ include(CheckTypeSize)
 include(GNUInstallDirs)
 
 set(logger_src_files
-    src/disk_util.c
+    src/logger_util.c
     src/logger.c
     src/logger_buffer.c
     src/logger_formatter.c
@@ -31,20 +31,24 @@ set(logger_src_files
 )
 
 set(clogger_default_target_name "clogger")
-set(clogger_debug_target_name "${clogger_default_target_name}_debug")
+set(clogger_debug_target_name "${clogger_default_target_name}d")
 set(clogger_static_target_name "${clogger_default_target_name}_static")
-set(clogger_testlib_target_name "${clogger_default_target_name}_test")
-set(clogger_testbin_target_name "${clogger_default_target_name}_test_bin")
+set(clogger_debug_static_target_name "${clogger_debug_target_name}_static")
+
+# init these to default values
+set(clogger_shared_target "${clogger_default_target_name}")
+set(clogger_static_target "${clogger_static_target_name}")
 
 set(default_compile_opts -Wall -Wextra)
 
 option(CLOGGER_BUILD_SHARED "build the shared library; default" ON)
 option(CLOGGER_BUILD_STATIC "build a static version of the library" OFF)
-option(CLOGGER_BUILD_TEST "build an executable to test the logger" OFF)
 option(CLOGGER_ENABLE_GRAYLOG "build support for a Graylog handler" ON)
-option(CLOGGER_STRESS_TEST "add a stress test to the test binary" OFF)
+option(CLOGGER_ENABLE_VERBOSE_WARNING "warning messages will be printed to stderr when functions fail" OFF)
+option(CLOGGER_BUILD_EXAMPLES "enables options for building example/debugging programs" OFF)
+option(CLOGGER_NO_DEBUG_WARNING "don't output warning messages when running a non-release build of the library" OFF)
 
-# XXX the source files can be set below, but those aren't inherited by other
+# TODO the source files can be set below, but those aren't inherited by other
 # libs that link this
 add_library(base_target INTERFACE)
 set_target_properties(base_target PROPERTIES
@@ -60,6 +64,20 @@ install(TARGETS base_target
     LIBRARY DESTINATION ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}
     PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_INCLUDEDIR}
 )
+
+if(CMAKE_BUILD_TYPE STREQUAL ${CLOGGER_BUILD_VAR_RELEASE})
+    # strip the final release binary
+    target_link_options(base_target INTERFACE -s)
+    # treat warnings as errors for release
+    target_compile_options(base_target INTERFACE -Werror)
+else()
+    # update the target names to use the debug names
+    set(clogger_shared_target "${clogger_debug_target_name}")
+    set(clogger_static_target "${clogger_debug_static_target_name}")
+endif()
+
+# need to put this after most definitions
+add_subdirectory(src/examples)
 
 set(CLOGGER_INCLUDE_FILES
     semaphore.h
@@ -138,63 +156,34 @@ if(CLOGGER_ENABLE_GRAYLOG)
 
 endif()
 
-if(CMAKE_BUILD_TYPE STREQUAL ${CLOGGER_BUILD_VAR_RELEASE})
-    # strip the final release binary
-    target_link_options(base_target INTERFACE -s)
-    # treat warnings as errors for release
-    target_compile_options(base_target INTERFACE -Werror)
+if(CLOGGER_ENABLE_VERBOSE_WARNING)
+    target_compile_options(base_target INTERFACE -DCLOGGER_VERBOSE_WARNING)
 endif()
 
-if(CLOGGER_STRESS_TEST)
-    # the test binary has to be built for the stress test
-    set(CLOGGER_BUILD_TEST ON)
-endif()
-
-if(CLOGGER_BUILD_TEST)
-    # create the test lib
-    add_library(${clogger_testlib_target_name} SHARED ${logger_src_files})
-    # link with the base interface to inherit properties
-    target_link_libraries(${clogger_testlib_target_name} PUBLIC base_target)
-
-    # update the compile options to build the testing functions
-    target_compile_options(${clogger_testlib_target_name} PRIVATE -DTESTING_FUNCTIONS_ENABLED)
-
-    set(CLOGGER_SYMBOL_CHECKS ${CLOGGER_SYMBOL_CHECKS}
-        sleep
-    )
-
-    # create the test binary
-    add_executable(${clogger_testbin_target_name} src/logger_test.c)
-    # set the output location for the test binary
-    set_target_properties(${clogger_testbin_target_name} PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/bin"
-    )
-
-    target_link_libraries(${clogger_testbin_target_name}
-        ${clogger_testlib_target_name}
-    )
-    target_compile_options(${clogger_testbin_target_name} PRIVATE -DTESTING_FUNCTIONS_ENABLED)
-
-    if(CLOGGER_STRESS_TEST)
-        target_compile_options(${clogger_testlib_target_name} PRIVATE -DCLOGGER_STRESS_TEST)
-        target_compile_options(${clogger_testbin_target_name} PRIVATE -DCLOGGER_STRESS_TEST)
-    endif()
+if(CLOGGER_ENABLE_NO_WARNING)
+    target_compile_options(base_target INTERFACE -DCLOGGER_REMOVE_WARNING)
 endif()
 
 if(CLOGGER_BUILD_STATIC)
-    add_library(${clogger_static_target_name} STATIC ${logger_src_files})
-    target_link_libraries(${clogger_static_target_name} PUBLIC base_target)
-    install(TARGETS ${clogger_static_target_name}
+    add_library(${clogger_static_target} STATIC ${logger_src_files})
+    target_link_libraries(${clogger_static_target} PUBLIC base_target)
+    # FIXME we don't want to install debug versions
+    install(TARGETS ${clogger_static_target}
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     )
 endif()
 
 if(CLOGGER_BUILD_SHARED)
-    add_library(${clogger_default_target_name} SHARED ${logger_src_files})
-    target_link_libraries(${clogger_default_target_name} PUBLIC base_target)
-    install(TARGETS ${clogger_default_target_name}
+    add_library(${clogger_shared_target} SHARED ${logger_src_files})
+    target_link_libraries(${clogger_shared_target} PUBLIC base_target)
+    # FIXME we don't want to install debug version
+    install(TARGETS ${clogger_shared_target}
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     )
+endif()
+
+if(NOT CLOGGER_BUILD_SHARED AND NOT CLOGGER_BUILD_STATIC)
+    message(FATAL_ERROR "Must specify a library to build")
 endif()
 
 foreach(HEADER_TEST ${CLOGGER_INCLUDE_FILES})
