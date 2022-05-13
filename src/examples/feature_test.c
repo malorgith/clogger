@@ -2,7 +2,7 @@
 // override the default buffer size by defining our own
 #define CLOGGER_BUFFER_SIZE 100
 // increase the size of the messages
-#define LOGGER_MAX_MESSAGE_SIZE 500
+#define CLOGGER_MAX_MESSAGE_SIZE 500
 
 #include "clogger.h"
 
@@ -22,7 +22,7 @@ int main(__attribute__((unused))int argc, __attribute__((unused))char** argv) {
         return 1;
     }
 
-    if (!logger_init(int_log_level)) {
+    if (logger_init(int_log_level)) {
         fprintf(stderr, "Failed to initialize the logger.\n");
         return 1;
     }
@@ -118,6 +118,11 @@ int main(__attribute__((unused))int argc, __attribute__((unused))char** argv) {
     logger_log_msg_id(LOGGER_ERROR, log_id_test, "test message with an id");
 
     sleep(3);
+
+    // check if the logger is still running
+    if (!logger_is_running()) {
+        fprintf(stderr, "The logger stopped running.\n");
+    }
 
     logger_log_msg(LOGGER_ALERT, "logger about to free\n");
 

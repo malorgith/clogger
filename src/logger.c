@@ -33,25 +33,25 @@ static bool volatile g_bTimestampEnabled = { true };
 const logger_id CLOGGER_DEFAULT_ID = { 0 };
 
 // private function declarations
-static bool _logger_add_message(t_loggermsg* msg);
-static bool _logger_log_msg(
+static int _logger_add_message(t_loggermsg* msg);
+static int _logger_log_msg(
     int log_level,
     logger_id id,
     char* format,
     char* msg,
     va_list arg_list
 );
-static bool _logger_read_message();
+static int _logger_read_message();
 static void *_logger_run(void *p_pData);
 static int _logger_timedwait(sem_t *p_pSem, int t_nWaitTimeSecs);
 
 // private function definitions
-bool _logger_add_message(t_loggermsg* msg) {
+int _logger_add_message(t_loggermsg* msg) {
 
     if (!g_logInit) {
         lgu_warn_msg("Dropping message because logger isn't running.");
         free(msg);
-        return false;
+        return 1;
     }
     /*
      * Allow messages to be added to the buffer when there are no
@@ -60,14 +60,14 @@ bool _logger_add_message(t_loggermsg* msg) {
 
     if (lgb_add_message(buf_refid, msg)) {
         lgu_warn_msg("Logger failed to add message to buffer.");
-        return false;
+        return 1;
     }
 
-    return true;
+    return 0;
 
 }
 
-bool _logger_log_msg(
+int _logger_log_msg(
     int log_level,
     logger_id id,
     __attribute__((unused))char* format,
@@ -80,26 +80,26 @@ bool _logger_log_msg(
     // Check the level
     if (log_level < 0) {
         lgu_warn_msg("Log level must be at least zero");
-        return false;
+        return 1;
     }
     else if (log_level > g_nLogLevel) {
         // This message won't be logged based on the log level
-        return true; // return true because no error occurred
+        return 0; // return 0 because no error occurred
     }
     else if (!g_logInit) {
         lgu_warn_msg("Can't add message; logger isn't running.");
-        return false;
+        return 1;
     }
 
     t_loggermsg* t_sFinalMessage = (t_loggermsg*) malloc(sizeof(t_loggermsg));
     va_list arg_list_copy;
     va_copy(arg_list_copy, arg_list);
-    int format_rtn = vsnprintf(t_sFinalMessage->m_sMsg, LOGGER_MAX_MESSAGE_SIZE, msg, arg_list_copy);
+    int format_rtn = vsnprintf(t_sFinalMessage->m_sMsg, CLOGGER_MAX_MESSAGE_SIZE, msg, arg_list_copy);
     va_end(arg_list_copy);
-    if ((format_rtn >= LOGGER_MAX_MESSAGE_SIZE) || (format_rtn < 0)) {
+    if ((format_rtn >= CLOGGER_MAX_MESSAGE_SIZE) || (format_rtn < 0)) {
         lgu_warn_msg("Failed to format the message before adding it to the buffer.");
         free(t_sFinalMessage);
-        return false;
+        return 1;
     }
     t_sFinalMessage->m_nLogLevel = log_level;
     t_sFinalMessage->m_nId = id;
@@ -113,17 +113,17 @@ bool _logger_log_msg(
      * to indicate when it currently has an associated message on a buffer, and we will
      * simply increment a lock here to indicate it can't be removed.
      */
-    char t_sId[LOGGER_ID_MAX_LEN];
+    char t_sId[CLOGGER_ID_MAX_LEN];
     if (lgi_get_id(t_sFinalMessage->m_nId, t_sId) != 0) {
         lgu_warn_msg("Failed to convert ID from reference to string.");
         free(t_sFinalMessage);
-        return false;
+        return 1;
     }
-    int copy_rtn = snprintf(t_sFinalMessage->m_sId, LOGGER_ID_MAX_LEN * (sizeof(char)), "%s", t_sId);
-    if ((copy_rtn >= LOGGER_ID_MAX_LEN) || (copy_rtn < 0)) {
+    int copy_rtn = snprintf(t_sFinalMessage->m_sId, CLOGGER_ID_MAX_LEN * (sizeof(char)), "%s", t_sId);
+    if ((copy_rtn >= CLOGGER_ID_MAX_LEN) || (copy_rtn < 0)) {
         lgu_warn_msg("Failed to set the logger ID in the message.");
         free(t_sFinalMessage);
-        return false;
+        return 1;
     }
 
     /*
@@ -140,7 +140,7 @@ bool _logger_log_msg(
         if (t_pResult != &t_TimeData) {
             lgu_warn_msg("logger failed to get the time.");
             free(t_sFinalMessage);
-            return false;
+            return 1;
         }
         t_sFinalMessage->m_tmTime = t_TimeData;
     }
@@ -148,18 +148,18 @@ bool _logger_log_msg(
     return (_logger_add_message(t_sFinalMessage));
 }
 
-bool _logger_read_message() {
+int _logger_read_message() {
 
     if(!g_logInit)
-        return false;
+        return 1;
     else if (lgh_get_num_handlers() < 1)
-        return false;
+        return 1;
 
     // Get the message at the current index
     t_loggermsg* t_pMsg = lgb_read_message(buf_refid);
     if (t_pMsg == NULL) {
         lgu_warn_msg("Failed to read a message from the buffer.");
-        return false;
+        return 1;
     }
 
     // get the format string
@@ -167,7 +167,7 @@ bool _logger_read_message() {
     if (lgf_format(g_lgformatter, formatted_string, &t_pMsg->m_tmTime, t_pMsg->m_nLogLevel)) {
         lgu_warn_msg("Failed to get the format for the message.");
         free(t_pMsg);
-        return false;
+        return 1;
     }
     t_pMsg->m_sFormat = formatted_string;
 
@@ -187,7 +187,7 @@ bool _logger_read_message() {
     }
     free(t_pMsg);                   // free the memory
 
-    return true;
+    return 0;
 }
 
 void *_logger_run(__attribute__((unused))void *p_pData) {
@@ -301,7 +301,7 @@ __attribute__((unused))int _logger_timedwait(sem_t *p_pSem, int milliseconds_to_
 }
 
 // public functions
-bool logger_init(int p_nLogLevel) {
+int logger_init(int p_nLogLevel) {
 
 #ifndef NDEBUG
 #ifndef CLOGGER_REMOVE_WARNING
@@ -311,47 +311,47 @@ bool logger_init(int p_nLogLevel) {
 
     if (g_logInit) {
         lgu_warn_msg("Logger has already been initialized");
-        return false;
+        return 1;
     }
 
     else if (! (LOGGER_SLEEP_SECS > 0)) {
         lgu_warn_msg("The amount of time the logger should sleep must be an integer greater than zero");
-        return false;
+        return 1;
     }
 
     if (lgi_init() != 0) {
         lgu_warn_msg("Failed to initialize the logger IDs.");
-        return false;
+        return 1;
     }
 
     // create the default logger id, which is 'main'
     if (logger_create_id((char*) "main") < 0) {
         lgu_warn_msg("Failed to create default logger ID.");
-        return false;
+        return 1;
     }
 
     // create the formatter
     g_lgformatter = (logger_formatter*) malloc(sizeof(logger_formatter));
     if (g_lgformatter == NULL) {
         lgu_warn_msg("Failed to allocate space for the formatter.");
-        return false;
+        return 1;
     }
     if (lgf_init(g_lgformatter)) {
         lgu_warn_msg("Failed to initialize formatter.");
-        return false;
+        return 1;
     }
     lgf_set_datetime_format(g_lgformatter, "%Y-%m-%d %H:%M:%S");
 
 
     // init the handler
     if (lgh_init()) {
-        return false;
+        return 1;
     }
 
     // Set the log level based on what the user specified
     if (p_nLogLevel < 0) {
         lgu_warn_msg("The log level must be at least zero.");
-        return false;
+        return 1;
     }
     g_nLogLevel = p_nLogLevel;
 
@@ -359,7 +359,7 @@ bool logger_init(int p_nLogLevel) {
     buf_refid = lgb_init();
     if (buf_refid < 0) {
         lgu_warn_msg("Failed to create the log buffer.");
-        return false;
+        return 1;
     }
 
     g_bExit = false;
@@ -374,15 +374,15 @@ bool logger_init(int p_nLogLevel) {
 #endif
 #endif
 
-    return true;
+    return 0;
 }
 
-bool logger_free() {
+int logger_free() {
 
-    int t_bExitStatus = true;
+    int t_nRtn = 0;
 
     if (!g_logInit)
-        return false;
+        return 1;
 
     // Tell the logging thread it's time to end
     g_bExit = true;
@@ -397,7 +397,7 @@ bool logger_free() {
         if (*join_val != true) {
             lgu_warn_msg("Got non-true value on exit of log thread.");
             fflush(stderr);
-            t_bExitStatus = false;
+            t_nRtn = 1;
         }
         free(join_val);
     }
@@ -406,13 +406,13 @@ bool logger_free() {
     if (lgb_free()) {
         lgu_warn_msg("Failed to free the log buffer.");
         fflush(stderr);
-        t_bExitStatus = false;
+        t_nRtn = 1;
     }
     buf_refid = -1;
 
     // free the handler memory
     if (lgh_free()) {
-        t_bExitStatus = false;
+        t_nRtn = 1;
     }
 
     // free the formatters
@@ -424,10 +424,10 @@ bool logger_free() {
 
     if (lgi_free() != 0) {
         lgu_warn_msg("Failed to free the logger IDs.");
-        t_bExitStatus = false;
+        t_nRtn = 1;
     }
 
-    return t_bExitStatus;
+    return t_nRtn;
 }
 
 int logger_log_str_to_int(char* p_sLogLevel) {
@@ -474,14 +474,15 @@ int logger_log_str_to_int(char* p_sLogLevel) {
     }
 }
 
-bool logger_is_running() {
-    return g_logInit;
+int logger_is_running() {
+    if (g_logInit) return 1;
+    else return 0;
 }
 
-bool logger_log_msg(int p_nLogLevel, char* msg, ...) {
+int logger_log_msg(int p_nLogLevel, char* msg, ...) {
     va_list arg_list;
     va_start(arg_list, msg);
-    bool rtn_val = _logger_log_msg(
+    int rtn_val = _logger_log_msg(
         p_nLogLevel,
         0,   // ID
         NULL,   // format
@@ -493,11 +494,11 @@ bool logger_log_msg(int p_nLogLevel, char* msg, ...) {
     return rtn_val;
 }
 
-bool logger_log_msg_id(int p_nLogLevel, logger_id log_id, char* msg, ...) {
+int logger_log_msg_id(int p_nLogLevel, logger_id log_id, char* msg, ...) {
 
     va_list arg_list;
     va_start(arg_list, msg);
-    bool rtn_val = _logger_log_msg(
+    int rtn_val = _logger_log_msg(
         p_nLogLevel,
         log_id,   // ID
         NULL,   // format
@@ -565,7 +566,7 @@ int logger_remove_id(logger_id id_ref) {
 #include <unistd.h>
 
 int logger_print_id(logger_id id_ref) {
-    char dest[LOGGER_ID_MAX_LEN];
+    char dest[CLOGGER_ID_MAX_LEN];
     lgi_get_id(id_ref, dest);
     printf("The logger ID is: %s\n", dest);
     return 0;

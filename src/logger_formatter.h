@@ -8,6 +8,7 @@ extern "C" {
 
 #include "clogger.h"
 
+#include <stdbool.h>
 #include <semaphore.h>
 #include <time.h>
 

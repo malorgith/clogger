@@ -14,11 +14,11 @@ extern "C" {
 #include <time.h>
 
 typedef struct {
-    char        m_sMsg[LOGGER_MAX_MESSAGE_SIZE];
+    char        m_sMsg[CLOGGER_MAX_MESSAGE_SIZE];
     int         m_nLogLevel;
     logger_id   m_nId;
     char*       m_sFormat;
-    char        m_sId[LOGGER_ID_MAX_LEN];
+    char        m_sId[CLOGGER_ID_MAX_LEN];
     struct tm   m_tmTime;
 } t_loggermsg;
 

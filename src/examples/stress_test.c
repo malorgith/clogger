@@ -1,6 +1,7 @@
 
 #include "clogger.h"
 
+#include <stdbool.h>
 #include <pthread.h>
 #include <unistd.h>
 
@@ -31,7 +32,7 @@ static void *stress_test_logger(void *p_pData) {
         struct timespec t_sleeptime = { 0, (long)10000000 };
         nanosleep(&t_sleeptime, NULL);
 
-        if (!logger_log_msg_id(LOGGER_INFO, id, msg)) {
+        if (logger_log_msg_id(LOGGER_INFO, id, msg)) {
             printf("Thread %d: Got my first failure at message number %d\n", t_nThread, t_nCount);
             fflush(stdout);
         }
@@ -73,9 +74,21 @@ static bool logger_run_stress_test(int p_nThreads, int p_nMessages) {
 }
 
 int main(__attribute__((unused))int argc, __attribute__((unused))char** argv) {
-    logger_init(LOGGER_DEBUG);
-    logger_create_console_handler(stdout);
+
+    if(logger_init(LOGGER_DEBUG)) {
+        fprintf(stderr, "Failed to initialize logger.\n");
+        return 1;
+    }
+    if (logger_create_console_handler(stdout)) {
+        fprintf(stderr, "Failed to add console handler to logger.\n");
+        logger_free();
+        return 1;
+    }
     logger_run_stress_test(5, 25);
-    logger_free();
+    if (logger_free()) {
+        fprintf(stderr, "Failed to stop logger.\n");
+        return 1;
+    }
+
     return 0;
 }

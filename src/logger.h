@@ -21,6 +21,8 @@ extern "C" {
 #define LOGGER_MAX_NUM_FORMATTERS   5
 
 #ifndef NDEBUG
+int logger_print_id(logger_id id_ref);
+
 /*!
  * Returns the value of g_nBufferReadIndex.
  *

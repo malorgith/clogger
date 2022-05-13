@@ -6,9 +6,8 @@
 extern "C" {
 #endif
 
-#include <stdbool.h>
 #include <stdint.h>
-#include <stdio.h> // FILE
+#include <stdio.h>
 
 /*! \file clogger.h
  *
@@ -37,12 +36,12 @@ extern "C" {
 
 #define LOGGER_MAX_LEVEL    7
 
-#ifndef LOGGER_MAX_MESSAGE_SIZE
-#define LOGGER_MAX_MESSAGE_SIZE 200
+#ifndef CLOGGER_MAX_MESSAGE_SIZE
+#define CLOGGER_MAX_MESSAGE_SIZE 200
 #endif
 
-#ifndef LOGGER_ID_MAX_LEN
-#define LOGGER_ID_MAX_LEN   30
+#ifndef CLOGGER_ID_MAX_LEN
+#define CLOGGER_ID_MAX_LEN   30
 #endif
 
 #ifndef CLOGGER_MAX_NUM_HANDLERS
@@ -59,11 +58,11 @@ extern "C" {
  * going to make sure.
  */
 
-#if LOGGER_MAX_MESSAGE_SIZE < 10
+#if CLOGGER_MAX_MESSAGE_SIZE < 10
 #error "Logger max message size must be 10 or greater"
 #endif
 
-#if LOGGER_ID_MAX_LEN < 1
+#if CLOGGER_ID_MAX_LEN < 1
 #error "Number of characters for log id must be at least 1"
 #endif
 
@@ -87,7 +86,6 @@ int logger_create_graylog_handler(char* p_sServer, int p_nPort, int p_nProtocol)
 typedef int logger_id;
 extern const logger_id CLOGGER_DEFAULT_ID;
 logger_id logger_create_id(char* p_sID);
-int logger_print_id(logger_id id_ref); // TODO consider moving to non-public or testing functions
 int logger_remove_id(logger_id id_ref);
 
 
@@ -97,40 +95,52 @@ int logger_remove_id(logger_id id_ref);
 /*!
  * Initializes variables and starts the logger thread.
  *
+ * Returns 0 on success
+ *
  */
-bool logger_init(int p_nLogLevel);
+int logger_init(int p_nLogLevel);
 
 /*!
  * Tells the logger thread it's time to exit, then frees any
  * used memory.
  *
+ * Returns 0 on success
+ *
  */
-bool logger_free();
+int logger_free();
 
 /*!
  * Log a message to all available handlers using the default logger_id.
  *
+ * Returns 0 on success
+ *
  */
-bool logger_log_msg(int p_nLogLevel, char* msg, ...);
+int logger_log_msg(int p_nLogLevel, char* msg, ...);
 
 /*!
  * Log a message to all available handlers using the specified logger_id.
  *
+ * Returns 0 on success
+ *
  */
-bool logger_log_msg_id(int p_nLogLevel, logger_id log_id, char* msg, ...);
+int logger_log_msg_id(int p_nLogLevel, logger_id log_id, char* msg, ...);
 
 /*!
  * Returns the integer representation of the log level specified
  * by the string p_sLogLevel.
  *
+ * Returns a negative value on failure
+ *
  */
 int logger_log_str_to_int(char* p_sLogLevel);
 
 /*!
- * Returns a bool indicating if the logger is active.
+ * Returns an int indicating if the logger is active.
+ *
+ * Returns > 0 if logger is running, 0 if it isn't
  *
  */
-bool logger_is_running();
+int logger_is_running();
 
 #ifdef __cplusplus
 }

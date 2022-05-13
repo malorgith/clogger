@@ -136,13 +136,13 @@ logger_id lgi_add_id(char* p_sId) {
     // have all the locks; modify the data
     for (int count = 0; count < LOGGER_ID_MAX_IDS; count++) {
         if (g_pIdValPtrs[count] == NULL) {
-            g_pIdValPtrs[count] = (char*) malloc(sizeof(char) * LOGGER_ID_MAX_LEN);
+            g_pIdValPtrs[count] = (char*) malloc(sizeof(char) * CLOGGER_ID_MAX_LEN);
             if (g_pIdValPtrs[count] == NULL) {
                 lgu_warn_msg("Failed to create space for the new logger ID.");
                 break;
             }
-            size_t snrtn = snprintf(g_pIdValPtrs[count], LOGGER_ID_MAX_LEN, "%s", p_sId);
-            if (snrtn >= LOGGER_ID_MAX_LEN) {
+            size_t snrtn = snprintf(g_pIdValPtrs[count], CLOGGER_ID_MAX_LEN, "%s", p_sId);
+            if (snrtn >= CLOGGER_ID_MAX_LEN) {
                 lgu_warn_msg("The logger ID given was too large to add.");
                 break;
             }
@@ -185,8 +185,8 @@ int lgi_get_id(logger_id id_ref, char* dest) {
     }
 
     if (rtn_val == 0) {
-        int copy_rtn = snprintf(dest, LOGGER_ID_MAX_LEN, "%s", g_pIdValPtrs[id_ref]);
-        if ((copy_rtn >= LOGGER_ID_MAX_LEN) || (copy_rtn < 0)) {
+        int copy_rtn = snprintf(dest, CLOGGER_ID_MAX_LEN, "%s", g_pIdValPtrs[id_ref]);
+        if ((copy_rtn >= CLOGGER_ID_MAX_LEN) || (copy_rtn < 0)) {
             lgu_warn_msg("Failed to copy the ID to the destination.");
             rtn_val = 1;
         }

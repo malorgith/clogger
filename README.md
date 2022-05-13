@@ -8,7 +8,11 @@ logging a message.
 
 # WARNING
 This library is still under active development. **Implementation details might change with little
-or no notice** until the first major release.
+or no notice until the first major release.**
+
+# Known Issues
+* Does not support multiple handlers of the same type
+* Does not support modifying the format of the log output
 
 # Using the library
 * Initialize the logger
@@ -31,7 +35,7 @@ but a value must be specified. To place logs in the current directory, use `./`.
 Example code can be found in `src/examples`.
 
 # TODO
-* Create version specific symlinks when installing the shared library
+* Create version-specific symlinks when installing the shared library
 * Embed version/build info into compiled library
 * Install appropriate CMake files with build output
 * Add locks to the `logger_id` objects so we can retrieve their values safely in the logging thread
