@@ -22,8 +22,6 @@ t_loggermsg* lgb_read_message(int bufref);
 
 int lgb_wait_for_messages(int bufref, int seconds_to_wait);
 
-int lgb_add_to_time(struct timespec *p_pTspec, int ms_to_add, int min_ms, int max_ms);
-
 #ifndef NDEBUG
 /*!
  * Returns the value of BUFFER_SIZE.

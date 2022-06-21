@@ -6,11 +6,16 @@
 #include <semaphore.h>
 #include <string.h> //memset()
 
+// public const definition
+const t_handlerref CLOGGER_HANDLER_ERR = { (1<<1) | (1<<2) };
+
 // file global vars
 static log_handler** g_pHandlers = { NULL };
 static sem_t*       g_pStorageSem = { NULL };
 static atomic_bool  g_bInit = { false };
 static atomic_int   g_nHandlers = { 0 };
+
+static t_handlerref g_refValid = { 0 };
 
 // private function declarations
 int _lgh_check_init();
@@ -48,6 +53,9 @@ int lgh_init() {
     for (int t_nCount = 0; t_nCount < CLOGGER_MAX_NUM_HANDLERS; t_nCount++) {
         g_pHandlers[t_nCount] = NULL;
     }
+
+    // this should already be set
+    g_refValid = 0;
 
     // allocate space for the semaphore
     g_pStorageSem = (sem_t*)malloc(sizeof(sem_t));
@@ -92,6 +100,7 @@ int lgh_free() {
     }
 
     g_nHandlers = 0;
+    g_refValid = 0;
 
     sem_destroy(g_pStorageSem);
     free(g_pStorageSem);
@@ -100,16 +109,37 @@ int lgh_free() {
     return 0;
 }
 
-int lgh_add_handler(const log_handler* p_pHandler) {
+int lgh_checks(const log_handler *p_pHandler, __attribute__((unused))size_t p_sizeData, const char* p_sCaller) {
+    if (p_pHandler == NULL) {
+        lgu_warn_msg_str("%s function was not given a handler pointer", p_sCaller);
+        return 1;
+    }
+    else if (p_pHandler->m_pHandlerData == NULL) {
+        lgu_warn_msg_str("%s function given handler that doesn't have data stored", p_sCaller);
+        return 1;
+    }
+    /*
+     * FIXME check below doesn't work as intended; sizeof(*(void*)) returns 1
+    else if (sizeof(*(p_pHandler->m_pHandlerData)) != p_sizeData) {
+        lgu_warn_msg_str("%s function given handler with data of incorrect size", p_sCaller);
+        return 1;
+    }
+    */
+
+    return 0;
+}
+
+t_handlerref lgh_add_handler(const log_handler* p_pHandler) {
 
     if (_lgh_check_init()) {
-        return -1;
+        return CLOGGER_HANDLER_ERR;
     }
 
-    int t_nHandlerIndex = 0;
     sem_wait(g_pStorageSem); // get the storage lock
 
-    for (t_nHandlerIndex = 0; t_nHandlerIndex < CLOGGER_MAX_NUM_HANDLERS; t_nHandlerIndex++) {
+    t_handlerref t_refRtn = 0;
+
+    for (int t_nHandlerIndex = 0; t_nHandlerIndex < CLOGGER_MAX_NUM_HANDLERS; t_nHandlerIndex++) {
         // look for empty space for the handler
         if (g_pHandlers[t_nHandlerIndex] == NULL) {
             // allocate space for the new handler
@@ -121,50 +151,47 @@ int lgh_add_handler(const log_handler* p_pHandler) {
             // use memcpy to set due to const ptrs
             memcpy(g_pHandlers[t_nHandlerIndex], p_pHandler, sizeof(log_handler));
             g_nHandlers++;
+            // mark the handler as valid in the global reference tracker
+            t_refRtn = (1<<t_nHandlerIndex);
+            g_refValid |= t_refRtn;
             break;
         }
     }
 
     sem_post(g_pStorageSem);
 
-    if (t_nHandlerIndex >= CLOGGER_MAX_NUM_HANDLERS) return -1;
-    else return t_nHandlerIndex;
+    if (t_refRtn == 0) return CLOGGER_HANDLER_ERR;
+    else return t_refRtn;
 }
 
 int lgh_get_num_handlers() {
-    return g_nHandlers;
-}
 
-int lgh_open_handlers() {
     if (_lgh_check_init()) {
         return 1;
     }
 
-    int t_nRtn = 0;
+    int t_nHandlers = 0;
 
-    // TODO this code might not be fully thread-safe, but we're going to check
-    // for handlers that aren't open before grabbing the lock
-    for (int t_nCount = 0; t_nCount < CLOGGER_MAX_NUM_HANDLERS; t_nCount++) {
-        if (g_pHandlers[t_nCount] != NULL) {
-            if (!g_pHandlers[t_nCount]->isOpen()) {
-                // now grab the lock TODO might be too late for thread safety
-                sem_wait(g_pStorageSem); // get the storage lock
-                if (g_pHandlers[t_nCount]->open()) {
-                    // failed to open a handler
-                    t_nRtn++;
-                }
-                /*
-                else {
-                    g_nHandlers++;
-                }
-                */
-                sem_post(g_pStorageSem);
-            }
-        }
+    sem_wait(g_pStorageSem);
+    t_nHandlers = g_nHandlers;
+    sem_post(g_pStorageSem);
+
+    return t_nHandlers;
+}
+
+t_handlerref lgh_get_valid_handlers() {
+
+    if (_lgh_check_init()) {
+        return CLOGGER_HANDLER_ERR;
     }
 
-    return t_nRtn;
+    t_handlerref t_refRtn = 0;
 
+    sem_wait(g_pStorageSem);
+    t_refRtn = g_refValid;
+    sem_post(g_pStorageSem);
+
+    return t_refRtn;
 }
 
 int lgh_remove_all_handlers() {
@@ -180,8 +207,8 @@ int lgh_remove_all_handlers() {
 
     for (int t_nCount = 0; t_nCount < CLOGGER_MAX_NUM_HANDLERS; t_nCount++) {
         if (g_pHandlers[t_nCount] != NULL) {
-            if (g_pHandlers[t_nCount]->isOpen()) {
-                if (g_pHandlers[t_nCount]->close()) {
+            if (g_pHandlers[t_nCount]->isOpen(g_pHandlers[t_nCount])) {
+                if (g_pHandlers[t_nCount]->close(g_pHandlers[t_nCount])) {
                     // failed to close a handler
                     t_nRtn++;
                 }
@@ -198,55 +225,90 @@ int lgh_remove_all_handlers() {
 }
 
 int lgh_remove_handler(t_handlerref p_refIndex) {
+    // TODO in theory this function could support removing
+    // multiple handlers at the same time, but for now we will
+    // force it to only accept one
     if (_lgh_check_init()) {
         return 1;
     }
-    else if (p_refIndex >= CLOGGER_MAX_NUM_HANDLERS) {
-        lgu_warn_msg("index of handler to write to is too large");
-        return 1;
-    }
-    else if(g_pHandlers[p_refIndex] == NULL) {
-        lgu_warn_msg("can't remove handler that hasn't been set");
-        return 1;
+    else if (p_refIndex & ~g_refValid) {
+        // the t_handlerref given isn't valid
+        lgu_warn_msg("asked to remove a handler with an invalid reference");
     }
 
-    // TODO if each handler gets its own read/write lock, this won't be needed
     sem_wait(g_pStorageSem); // get the storage lock
-    if (g_pHandlers[p_refIndex]->isOpen()) {
-        // close the handler
-        g_pHandlers[p_refIndex]->close();
+    for (t_handlerref t_nCount = 0; t_nCount < CLOGGER_MAX_NUM_HANDLERS; t_nCount++) {
+        if ((g_pHandlers[t_nCount] != NULL) && (p_refIndex & (1<<t_nCount))) {
+            if (p_refIndex != (1<<t_nCount)) {
+                // we were asked to remove more than one handler
+                lgu_warn_msg("asked to remove more than one handler");
+                sem_post(g_pStorageSem);
+                return 1;
+            }
+
+            // check if the handler is open
+            if (g_pHandlers[p_refIndex]->isOpen(g_pHandlers[t_nCount])) {
+                // close the handler
+                g_pHandlers[p_refIndex]->close(g_pHandlers[t_nCount]);
+            }
+
+            // free the memory for the handler
+            free(g_pHandlers[t_nCount]);
+            g_pHandlers[t_nCount] = NULL;
+            g_nHandlers--;
+            if (g_nHandlers < 0) g_nHandlers = 0;
+            sem_post(g_pStorageSem);
+            return 0;
+        }
     }
-    // free the memory for the handler
-    free(g_pHandlers[p_refIndex]);
-    g_pHandlers[p_refIndex] = NULL;
-    g_nHandlers--;
-    if (g_nHandlers < 0) g_nHandlers = 0;
+
+    // don't think we can make it here
     sem_post(g_pStorageSem);
 
-    return 0;
+    return 1;
 }
 
 int lgh_write(t_handlerref p_refIndex, const t_loggermsg *p_pMsg) {
     if (_lgh_check_init()) {
         return 1;
     }
-    else if (p_refIndex >= CLOGGER_MAX_NUM_HANDLERS) {
-        lgu_warn_msg("index of handler to write to is too large");
+    else if (p_refIndex & ~g_refValid) {
+        // the t_handlerref given isn't valid
+        lgu_warn_msg("asked to write to a handler with an invalid reference");
         return 1;
     }
-    else if(g_pHandlers[p_refIndex] == NULL) {
-        lgu_warn_msg("can't write to handler that hasn't been set");
-        return 1;
-    }
+
+    int t_nRtn = 0;
 
     // TODO if each handler gets its own read/write lock, this won't be needed
     sem_wait(g_pStorageSem); // get the storage lock
 
-    g_pHandlers[p_refIndex]->write(p_pMsg);
+    for (t_handlerref t_nCount = 0; t_nCount < CLOGGER_MAX_NUM_HANDLERS; t_nCount++) {
+        if ((g_pHandlers[t_nCount] != NULL) && (p_refIndex & (1<<t_nCount))) {
+            // check if the handler needs to be opened
+            if (!g_pHandlers[t_nCount]->isOpen(g_pHandlers[t_nCount])) {
+                // try to open the handler
+                if (g_pHandlers[t_nCount]->open(g_pHandlers[t_nCount])) {
+                    lgu_warn_msg("asked to write to a handler that isn't open, and it couldn't be opened");
+                    t_nRtn++;
+                    continue;
+                }
+            }
+            // write the message to the handler
+            if (g_pHandlers[t_nCount]->write(g_pHandlers[t_nCount], p_pMsg)) {
+                // failed to write to a handler; indicate an error, but keep going
+                t_nRtn++;
+            }
+        }
+        if (p_refIndex <= (1<<t_nCount)) {
+            // there aren't any higher bits set
+            break;
+        }
+    }
 
     sem_post(g_pStorageSem);
 
-    return 0;
+    return t_nRtn;
 }
 
 int lgh_write_to_all(const t_loggermsg *p_pMsg) {
@@ -261,8 +323,8 @@ int lgh_write_to_all(const t_loggermsg *p_pMsg) {
 
     for (int t_nCount = 0; t_nCount < CLOGGER_MAX_NUM_HANDLERS; t_nCount++) {
         if (g_pHandlers[t_nCount] != NULL) {
-            if (g_pHandlers[t_nCount]->isOpen()) {
-                if (g_pHandlers[t_nCount]->write(p_pMsg)) {
+            if (g_pHandlers[t_nCount]->isOpen(g_pHandlers[t_nCount])) {
+                if (g_pHandlers[t_nCount]->write(g_pHandlers[t_nCount], p_pMsg)) {
                     // failed to write to a handler
                     // TODO could we identify the handler that failed?
                     lgu_warn_msg_int("failed to write to open handler at reference %d", t_nCount);

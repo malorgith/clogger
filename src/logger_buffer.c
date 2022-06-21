@@ -6,10 +6,6 @@
 #include <stdatomic.h>
 #include <stdlib.h>
 
-#ifndef LOGGER_SLEEP_SECS
-#define LOGGER_SLEEP_SECS 1
-#endif
-
 #ifndef BUFFER_CLOSE_WARN
 #define BUFFER_CLOSE_WARN 5 // stop adding messages to buffer when there's this number or fewer free spaces
 #endif
@@ -311,31 +307,39 @@ t_loggermsg* lgb_read_message(int bufref) {
  */
 int lgb_wait_for_messages(int bufref, int milliseconds_to_wait) {
 
-    static const int max_milliseconds_wait = 3000;
+    // FIXME this value is specified twice; here and in logger.c called g_nMaxSleepTime
+    static const int max_milliseconds_wait = 5000;
     static const int min_milliseconds_wait = 1;
 
     if (_lgb_check_values(bufref))
         return -1;
 
+    sem_wait(&buffers[bufref]->rlock); // get the lock to make sure the buffer isn't removed
+
     // before doing anything else, check if there's already a message
     if (buffers[bufref]->amsgs > 0) {
+        sem_post(&buffers[bufref]->rlock);
         return 0;
     }
 
     // get the current time
-    struct timespec break_time;
+    struct timespec break_time = {0, 0};
+
+#ifdef CLOGGER_NO_SLEEP
     if (clock_gettime(CLOCK_REALTIME, &break_time) == 1) {
         lgu_warn_msg("something went wrong getting the time");
+        sem_post(&buffers[bufref]->rlock);
         return -1;
     }
 
     // determine the time to break from the loop
-    lgb_add_to_time(&break_time, milliseconds_to_wait, min_milliseconds_wait, max_milliseconds_wait);
+    lgu_add_to_time(&break_time, milliseconds_to_wait, min_milliseconds_wait, max_milliseconds_wait);
 
     while(buffers[bufref]->amsgs == 0) {
         struct timespec loop_time;
         if (clock_gettime(CLOCK_REALTIME, &loop_time) == 1) {
             lgu_warn_msg("something went wrong getting the time");
+            sem_post(&buffers[bufref]->rlock);
             return -1;
         }
         // check if we've looped for enough time
@@ -343,45 +347,33 @@ int lgb_wait_for_messages(int bufref, int milliseconds_to_wait) {
             (loop_time.tv_sec >= break_time.tv_sec) &&
             (loop_time.tv_nsec >= break_time.tv_nsec)
         ) {
+            sem_post(&buffers[bufref]->rlock);
             return 1; // return 1 to indicate max time elapsed
         }
     }
+#else
+    lgu_add_to_time(&break_time, milliseconds_to_wait, min_milliseconds_wait, max_milliseconds_wait);
+    // sleep for the time specified
+    if (nanosleep(&break_time, NULL)) {
+        // interrupted by signal or enountered an error
+        sem_post(&buffers[bufref]->rlock);
+        return -1;
+    }
 
-    if (buffers[bufref]->amsgs > 0)
+    if (buffers[bufref]->amsgs <= 0) {
+        sem_post(&buffers[bufref]->rlock);
+        return 1; // max time elapsed
+    }
+#endif
+
+    if (buffers[bufref]->amsgs > 0) {
+        sem_post(&buffers[bufref]->rlock);
         return 0; // there's at least one message
+    }
 
     // we should have returned from the loop above after timing out, so indicate error
+    sem_post(&buffers[bufref]->rlock);
     return -1;
-}
-
-int lgb_add_to_time(struct timespec *p_pTspec, int ms_to_add, int min_ms, int max_ms) {
-
-    if (ms_to_add > max_ms) {
-        lgu_warn_msg_int("Maximum time to wait is %d milliseconds.", max_ms);
-        ms_to_add = max_ms;
-    }
-    else if (ms_to_add < min_ms) {
-        lgu_warn_msg_int("Minimum time to wait is %d milliseconds.", min_ms);
-        ms_to_add = min_ms;
-    }
-
-    // convert the milliseconds to nanoseconds
-    long sleep_time_nsecs = ms_to_add * (long) 1000000;
-    int sleep_time_secs = 0;
-    while (sleep_time_nsecs >= (long) 1000000000) {
-        sleep_time_nsecs -= (long) 1000000000;
-        sleep_time_secs++;
-    }
-
-    // add the time to the struct
-    p_pTspec->tv_sec += sleep_time_secs;
-    p_pTspec->tv_nsec += sleep_time_nsecs;
-    if (p_pTspec->tv_nsec >= (long) 1000000000) {
-        p_pTspec->tv_nsec -= (long) 1000000000;
-        p_pTspec->tv_sec += 1;
-    }
-
-    return 0;
 }
 
 #ifndef NDEBUG

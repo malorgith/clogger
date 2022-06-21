@@ -6,13 +6,6 @@
 extern "C" {
 #endif
 
-/*! \file logger.h
- *
- * A threaded logger that places an emphasis on minimizing the
- * time spent sending a message.
- *
- */
-
 #include "logger_handler.h"
 #include "logger_id.h"
 

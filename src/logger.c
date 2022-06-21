@@ -21,6 +21,8 @@
 static atomic_bool g_bExit = { false };
 static bool volatile g_logInit = { false };
 static int g_nLogLevel;
+static atomic_int g_nLogSleepTime = { 1 };
+static const unsigned int g_nMaxSleepTime = { 5000 };
 static pthread_t g_LogThread;
 
 static logger_formatter* g_lgformatter = { NULL };
@@ -38,7 +40,7 @@ static int _logger_log_msg(
     int log_level,
     logger_id id,
     char* format,
-    char* msg,
+    const char* msg,
     va_list arg_list
 );
 static int _logger_read_message();
@@ -49,7 +51,7 @@ static int _logger_timedwait(sem_t *p_pSem, int t_nWaitTimeSecs);
 int _logger_add_message(t_loggermsg* msg) {
 
     if (!g_logInit) {
-        lgu_warn_msg("Dropping message because logger isn't running.");
+        lgu_warn_msg("dropping message because logger isn't running");
         free(msg);
         return 1;
     }
@@ -59,7 +61,9 @@ int _logger_add_message(t_loggermsg* msg) {
      */
 
     if (lgb_add_message(buf_refid, msg)) {
-        lgu_warn_msg("Logger failed to add message to buffer.");
+        lgu_warn_msg("logger failed to add message to buffer");
+        // update message count on id since message wasn't added
+        lgi_remove_message(msg->m_refId);
         return 1;
     }
 
@@ -71,7 +75,7 @@ int _logger_log_msg(
     int log_level,
     logger_id id,
     __attribute__((unused))char* format,
-    char* msg,
+    const char* msg,
     va_list arg_list
 ) {
 
@@ -79,7 +83,7 @@ int _logger_log_msg(
 
     // Check the level
     if (log_level < 0) {
-        lgu_warn_msg("Log level must be at least zero");
+        lgu_warn_msg("log level must be at least zero");
         return 1;
     }
     else if (log_level > g_nLogLevel) {
@@ -87,7 +91,7 @@ int _logger_log_msg(
         return 0; // return 0 because no error occurred
     }
     else if (!g_logInit) {
-        lgu_warn_msg("Can't add message; logger isn't running.");
+        lgu_warn_msg("can't add message; logger isn't running");
         return 1;
     }
 
@@ -97,34 +101,20 @@ int _logger_log_msg(
     int format_rtn = vsnprintf(t_sFinalMessage->m_sMsg, CLOGGER_MAX_MESSAGE_SIZE, msg, arg_list_copy);
     va_end(arg_list_copy);
     if ((format_rtn >= CLOGGER_MAX_MESSAGE_SIZE) || (format_rtn < 0)) {
-        lgu_warn_msg("Failed to format the message before adding it to the buffer.");
+        lgu_warn_msg("failed to format the message before adding it to the buffer");
         free(t_sFinalMessage);
         return 1;
     }
     t_sFinalMessage->m_nLogLevel = log_level;
-    t_sFinalMessage->m_nId = id;
     t_sFinalMessage->m_sFormat = NULL;
 
-    /*
-     * TODO
-     * We currently have to get the logger_id here in case it's removed before the logging
-     * thread gets to the message on the buffer. This isn't ideal because we must obtain locks
-     * to get the value. Instead each logger_id should have its own lock(s) that can be used
-     * to indicate when it currently has an associated message on a buffer, and we will
-     * simply increment a lock here to indicate it can't be removed.
-     */
-    char t_sId[CLOGGER_ID_MAX_LEN];
-    if (lgi_get_id(t_sFinalMessage->m_nId, t_sId) != 0) {
-        lgu_warn_msg("Failed to convert ID from reference to string.");
+    if (lgi_add_message(id)) {
+        // failed to indicate there's a message waiting to use the ID
+        lgu_warn_msg("can't add message to buffer because the ID couldn't be incremented");
         free(t_sFinalMessage);
         return 1;
     }
-    int copy_rtn = snprintf(t_sFinalMessage->m_sId, CLOGGER_ID_MAX_LEN * (sizeof(char)), "%s", t_sId);
-    if ((copy_rtn >= CLOGGER_ID_MAX_LEN) || (copy_rtn < 0)) {
-        lgu_warn_msg("Failed to set the logger ID in the message.");
-        free(t_sFinalMessage);
-        return 1;
-    }
+    t_sFinalMessage->m_refId = id;
 
     /*
      * TODO
@@ -138,7 +128,7 @@ int _logger_log_msg(
         struct tm t_TimeData;
         struct tm *t_pResult = localtime_r(&t_Time, &t_TimeData);
         if (t_pResult != &t_TimeData) {
-            lgu_warn_msg("logger failed to get the time.");
+            lgu_warn_msg("logger failed to get the time");
             free(t_sFinalMessage);
             return 1;
         }
@@ -158,29 +148,30 @@ int _logger_read_message() {
     // Get the message at the current index
     t_loggermsg* t_pMsg = lgb_read_message(buf_refid);
     if (t_pMsg == NULL) {
-        lgu_warn_msg("Failed to read a message from the buffer.");
+        lgu_warn_msg("failed to read a message from the buffer");
         return 1;
     }
 
     // get the format string
     char formatted_string[50]; // FIXME size
     if (lgf_format(g_lgformatter, formatted_string, &t_pMsg->m_tmTime, t_pMsg->m_nLogLevel)) {
-        lgu_warn_msg("Failed to get the format for the message.");
+        lgu_warn_msg("failed to get the format for the message");
         free(t_pMsg);
         return 1;
     }
     t_pMsg->m_sFormat = formatted_string;
 
-    /*
-     * TODO
-     * We should get the value of the logger_id here, but it could lead to an ID being
-     * removed before the logging thread retrieves its value. Locks should be added to
-     * each ID to indicate when it's currently waiting to be used. When those are in place,
-     * we can can get the value of the ID here, and free its lock when done.
-     */
+    t_handlerref t_refHandlers = lgi_get_id(t_pMsg->m_refId, t_pMsg->m_sId);
+    if (t_refHandlers == 0) {
+        lgu_warn_msg("failed to convert ID from reference to string");
+        lgi_remove_message(t_pMsg->m_refId);
+        free(t_pMsg);
+        return 1;
+    }
+    lgi_remove_message(t_pMsg->m_refId);
 
-    // TODO attach handlers to logger_id, and write to handlers based on the id used
-    if (lgh_write_to_all(t_pMsg)) {
+    // write to the handlers specified by the message
+    if (lgh_write(t_refHandlers, t_pMsg)) {
         // we either failed to write to one or more handlers, or there were no open
         // handlers to write to
         lgu_warn_msg("logger thread failed to write to a handler");
@@ -193,32 +184,13 @@ int _logger_read_message() {
 void *_logger_run(__attribute__((unused))void *p_pData) {
 
     bool t_bExit = false;
-    int t_nCurrentHandlers = 0;
     while(true) {
 
         short t_nMessagesBeforeCheck = 25;  // TODO This value should probably be less than the buffer size
         short t_nMessagesRead = 0;
 
         while(t_nMessagesRead < t_nMessagesBeforeCheck) {
-            int wait_rtn = lgb_wait_for_messages(buf_refid, 1); // FIXME need to make this variable
-
-            int t_nNewHandlerCount = lgh_get_num_handlers();
-            if (t_nNewHandlerCount < 0) {
-                // FIXME error handle
-                lgu_warn_msg("logger thread aborting because it couldn't get number of handlers");
-                return NULL;
-            }
-
-            if (t_nNewHandlerCount != t_nCurrentHandlers) {
-                // handler(s) to open
-                if (lgh_open_handlers()) {
-                    // failed to open a handler
-                    lgu_warn_msg("Logger thread failed to open a handler.");
-                    // FIXME error handle
-                    return NULL;
-                }
-                t_nCurrentHandlers= lgh_get_num_handlers();
-            }
+            int wait_rtn = lgb_wait_for_messages(buf_refid, g_nLogSleepTime);
 
             if (wait_rtn == 0) {
                 // there's a message to read
@@ -231,7 +203,7 @@ void *_logger_run(__attribute__((unused))void *p_pData) {
             }
             else if (wait_rtn < 0) {
                 // something went wrong
-                lgu_warn_msg("Something went wrong while waiting for a message to be placed on the buffer.");
+                lgu_warn_msg("something went wrong while waiting for a message to be placed on the buffer");
                 // FIXME fail? error?
                 break;
             }
@@ -273,11 +245,11 @@ __attribute__((unused))int _logger_timedwait(sem_t *p_pSem, int milliseconds_to_
 
     struct timespec t_timespecWait;
     if (clock_gettime(CLOCK_REALTIME, &t_timespecWait) == 1) {
-        lgu_warn_msg("Failed to get the time before waiting for semaphore.");
+        lgu_warn_msg("failed to get the time before waiting for semaphore");
         return 1;
     }
 
-    lgb_add_to_time(&t_timespecWait, milliseconds_to_wait, min_milliseconds_wait, max_milliseconds_wait);
+    lgu_add_to_time(&t_timespecWait, milliseconds_to_wait, min_milliseconds_wait, max_milliseconds_wait);
 
     int t_nSemRtn;
     while((t_nSemRtn = sem_timedwait(p_pSem, &t_timespecWait)) == -1 && errno == EINTR)
@@ -292,7 +264,7 @@ __attribute__((unused))int _logger_timedwait(sem_t *p_pSem, int milliseconds_to_
         }
         else {
             // it timed out
-            lgu_warn_msg("Timed out trying to get semaphore.");
+            lgu_warn_msg("timed out trying to get semaphore");
             return errno;
         }
     }
@@ -310,47 +282,46 @@ int logger_init(int p_nLogLevel) {
 #endif
 
     if (g_logInit) {
-        lgu_warn_msg("Logger has already been initialized");
+        lgu_warn_msg("logger has already been initialized");
         return 1;
     }
 
     else if (! (LOGGER_SLEEP_SECS > 0)) {
-        lgu_warn_msg("The amount of time the logger should sleep must be an integer greater than zero");
+        lgu_warn_msg("the amount of time the logger should sleep must be an integer greater than zero");
         return 1;
     }
 
     if (lgi_init() != 0) {
-        lgu_warn_msg("Failed to initialize the logger IDs.");
+        lgu_warn_msg("failed to initialize the logger IDs");
         return 1;
     }
-
-    // create the default logger id, which is 'main'
-    if (logger_create_id((char*) "main") < 0) {
-        lgu_warn_msg("Failed to create default logger ID.");
-        return 1;
-    }
-
-    // create the formatter
-    g_lgformatter = (logger_formatter*) malloc(sizeof(logger_formatter));
-    if (g_lgformatter == NULL) {
-        lgu_warn_msg("Failed to allocate space for the formatter.");
-        return 1;
-    }
-    if (lgf_init(g_lgformatter)) {
-        lgu_warn_msg("Failed to initialize formatter.");
-        return 1;
-    }
-    lgf_set_datetime_format(g_lgformatter, "%Y-%m-%d %H:%M:%S");
-
 
     // init the handler
     if (lgh_init()) {
         return 1;
     }
 
+    // create the default logger id, which is 'main'; must do after lgh_init()
+    if (logger_create_id((char*) "main") == CLOGGER_MAX_NUM_IDS) {
+        lgu_warn_msg("failed to create default logger ID");
+        return 1;
+    }
+
+    // create the formatter
+    g_lgformatter = (logger_formatter*) malloc(sizeof(logger_formatter));
+    if (g_lgformatter == NULL) {
+        lgu_warn_msg("failed to allocate space for the formatter");
+        return 1;
+    }
+    if (lgf_init(g_lgformatter)) {
+        lgu_warn_msg("failed to initialize formatter");
+        return 1;
+    }
+    lgf_set_datetime_format(g_lgformatter, "%Y-%m-%d %H:%M:%S");
+
     // Set the log level based on what the user specified
     if (p_nLogLevel < 0) {
-        lgu_warn_msg("The log level must be at least zero.");
+        lgu_warn_msg("the log level must be at least zero");
         return 1;
     }
     g_nLogLevel = p_nLogLevel;
@@ -358,7 +329,7 @@ int logger_init(int p_nLogLevel) {
     // TODO make sure this value is >= 0 before changing it?
     buf_refid = lgb_init();
     if (buf_refid < 0) {
-        lgu_warn_msg("Failed to create the log buffer.");
+        lgu_warn_msg("failed to create the log buffer");
         return 1;
     }
 
@@ -390,12 +361,12 @@ int logger_free() {
     bool* join_val = NULL;
     pthread_join(g_LogThread, (void**) &join_val);
     if (join_val == NULL) {
-        lgu_warn_msg("Failed to get status from log thread.");
+        lgu_warn_msg("failed to get status from log thread");
         fflush(stderr);
     }
     else {
         if (*join_val != true) {
-            lgu_warn_msg("Got non-true value on exit of log thread.");
+            lgu_warn_msg("got non-true value on exit of log thread");
             fflush(stderr);
             t_nRtn = 1;
         }
@@ -403,8 +374,14 @@ int logger_free() {
     }
 
     g_logInit = false;
+
+    if (lgi_free() != 0) {
+        lgu_warn_msg("failed to free the logger IDs");
+        t_nRtn = 1;
+    }
+
     if (lgb_free()) {
-        lgu_warn_msg("Failed to free the log buffer.");
+        lgu_warn_msg("failed to free the log buffer");
         fflush(stderr);
         t_nRtn = 1;
     }
@@ -422,15 +399,10 @@ int logger_free() {
     free(g_lgformatter);
     g_lgformatter = NULL;
 
-    if (lgi_free() != 0) {
-        lgu_warn_msg("Failed to free the logger IDs.");
-        t_nRtn = 1;
-    }
-
     return t_nRtn;
 }
 
-int logger_log_str_to_int(char* p_sLogLevel) {
+int logger_log_str_to_int(const char* p_sLogLevel) {
 
     if (strcmp(p_sLogLevel, "emergency") == 0) {
         return LOGGER_EMERGENCY;
@@ -464,7 +436,7 @@ int logger_log_str_to_int(char* p_sLogLevel) {
         int t_nFormatRtn = snprintf(t_sLogMsg, t_nMsgSize, t_sMsg, p_sLogLevel);
         if ((t_nFormatRtn == 0) || (t_nFormatRtn >= t_nMsgSize)) {
             // failed to format the message
-            lgu_warn_msg("Couldn't match given string to a known log level");
+            lgu_warn_msg("couldn't match given string to a known log level");
         }
         else {
             lgu_warn_msg(t_sMsg);
@@ -479,7 +451,7 @@ int logger_is_running() {
     else return 0;
 }
 
-int logger_log_msg(int p_nLogLevel, char* msg, ...) {
+int logger_log_msg(int p_nLogLevel, const char* msg, ...) {
     va_list arg_list;
     va_start(arg_list, msg);
     int rtn_val = _logger_log_msg(
@@ -494,7 +466,7 @@ int logger_log_msg(int p_nLogLevel, char* msg, ...) {
     return rtn_val;
 }
 
-int logger_log_msg_id(int p_nLogLevel, logger_id log_id, char* msg, ...) {
+int logger_log_msg_id(int p_nLogLevel, logger_id log_id, const char* msg, ...) {
 
     va_list arg_list;
     va_start(arg_list, msg);
@@ -510,53 +482,107 @@ int logger_log_msg_id(int p_nLogLevel, logger_id log_id, char* msg, ...) {
     return rtn_val;
 }
 
-// handler code
-int logger_create_console_handler(FILE *p_pOut) {
-    log_handler tmp_handler;
-    int rtnval = create_console_handler(&tmp_handler, p_pOut);
-    if (rtnval != 0) {
-        return rtnval;
+#ifndef CLOGGER_NO_SLEEP
+int logger_set_sleep_time(unsigned int p_nMillisecondsToSleep) {
+    if (p_nMillisecondsToSleep > g_nMaxSleepTime) {
+        lgu_warn_msg_int("Max sleep time cannot exceed %d milliseconds", (int)g_nMaxSleepTime);
+        return 1;
     }
-    int t_refHandler = lgh_add_handler(&tmp_handler);
-    // TODO the references to the handlers should be saved
-    if (t_refHandler >= 0) return 0;
-    else return 1;
+    g_nLogSleepTime = p_nMillisecondsToSleep;
+    return 0;
+}
+#endif
+
+// handler code
+t_handlerref logger_create_console_handler(FILE *p_pOut) {
+
+    log_handler tmp_handler;
+    if (create_console_handler(&tmp_handler, p_pOut))
+        return CLOGGER_HANDLER_ERR;
+
+    t_handlerref t_refHandler = lgh_add_handler(&tmp_handler);
+    if (t_refHandler == CLOGGER_HANDLER_ERR) {
+        return CLOGGER_HANDLER_ERR;
+    }
+
+    // TODO for now we assume we want to add all handlers to the main id
+    if (lgi_add_handler(CLOGGER_DEFAULT_ID, t_refHandler)) {
+        lgu_warn_msg("failed to add new console handler to main id");
+        // TODO didn't actually fail to create handler...
+        return CLOGGER_HANDLER_ERR;
+    }
+
+    return t_refHandler;
 }
 
-int logger_create_file_handler(char* p_sLogLocation, char* p_sLogName) {
+t_handlerref logger_create_file_handler(const char* p_sLogLocation, const char* p_sLogName) {
+
     log_handler tmp_handler;
-    int rtnval = create_file_handler(&tmp_handler, p_sLogLocation, p_sLogName);
-    if (rtnval != 0) {
-        return rtnval;
+    if (create_file_handler(&tmp_handler, p_sLogLocation, p_sLogName))
+        return CLOGGER_HANDLER_ERR;
+
+    t_handlerref t_refHandler = lgh_add_handler(&tmp_handler);
+    if (t_refHandler == CLOGGER_HANDLER_ERR) {
+        return CLOGGER_HANDLER_ERR;
     }
-    int t_refHandler = lgh_add_handler(&tmp_handler);
-    // TODO the references to the handlers should be saved
-    if (t_refHandler >= 0) return 0;
-    else return 1;
+
+    // TODO for now we assume we want to add all handlers to the main id
+    if (lgi_add_handler(CLOGGER_DEFAULT_ID, t_refHandler)) {
+        lgu_warn_msg("failed to add new file handler to main id");
+        // TODO didn't actually fail to create handler...
+        return CLOGGER_HANDLER_ERR;
+    }
+
+    return t_refHandler;
 }
 
 #ifdef CLOGGER_GRAYLOG
-int logger_create_graylog_handler(char* p_sServer, int p_nPort, int p_nProtocol) {
+t_handlerref logger_create_graylog_handler(const char* p_sServer, int p_nPort, int p_nProtocol) {
+
     log_handler tmp_handler;
-    int rtnval = create_graylog_handler(&tmp_handler, p_sServer, p_nPort, p_nProtocol);
-    if (rtnval != 0) {
-        return rtnval;
+    if (create_graylog_handler(&tmp_handler, p_sServer, p_nPort, p_nProtocol))
+        return CLOGGER_HANDLER_ERR;
+
+    t_handlerref t_refHandler = lgh_add_handler(&tmp_handler);
+    if (t_refHandler == CLOGGER_HANDLER_ERR) {
+        return CLOGGER_HANDLER_ERR;
     }
-    int t_refHandler = lgh_add_handler(&tmp_handler);
-    // TODO the references to the handlers should be saved
-    if (t_refHandler >= 0) return 0;
-    else return 1;
+
+    // TODO for now we assume we want to add all handlers to the main id
+    if (lgi_add_handler(CLOGGER_DEFAULT_ID, t_refHandler)) {
+        lgu_warn_msg("failed to add new Graylog handler to main id");
+        // TODO didn't actually fail to create handler...
+        return CLOGGER_HANDLER_ERR;
+    }
+
+    return t_refHandler;
 }
 #endif
 
 // id code
-logger_id logger_create_id(char* p_sID) {
-    return lgi_add_id(p_sID);
+logger_id logger_create_id(const char* p_sID) {
+    logger_id t_refId = lgi_add_id(p_sID);
+    if (t_refId == CLOGGER_MAX_NUM_IDS)
+        return CLOGGER_MAX_NUM_IDS;
+
+    // TODO for this implementation, we will assume the id gets all available handlers
+    t_handlerref t_refAllHandlers = lgh_get_valid_handlers();
+    if (lgi_add_handler(t_refId, t_refAllHandlers)) {
+        lgu_warn_msg("failed to add all handlers to newly created id");
+        return CLOGGER_MAX_NUM_IDS;
+    }
+
+    return t_refId;
+}
+
+logger_id logger_create_id_w_handlers(const char* p_sID, t_handlerref p_refHandlers) {
+    // TODO we could verify that the handlers we were given are valid...
+    return lgi_add_id_w_handler(p_sID, p_refHandlers);
 }
 
 int logger_remove_id(logger_id id_ref) {
     if (id_ref == CLOGGER_DEFAULT_ID) {
-        lgu_warn_msg("Can't remove the default logger_id.");
+        lgu_warn_msg("can't remove the default logger_id");
         return -1;
     }
     return lgi_remove_id(id_ref);

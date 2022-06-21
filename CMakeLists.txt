@@ -43,10 +43,12 @@ set(default_compile_opts -Wall -Wextra)
 
 option(CLOGGER_BUILD_SHARED "build the shared library; default" ON)
 option(CLOGGER_BUILD_STATIC "build a static version of the library" OFF)
+option(CLOGGER_BUILD_NO_STRIP "don't strip the Release binary" OFF)
 option(CLOGGER_ENABLE_GRAYLOG "build support for a Graylog handler" ON)
 option(CLOGGER_ENABLE_VERBOSE_WARNING "warning messages will be printed to stderr when functions fail" OFF)
 option(CLOGGER_BUILD_EXAMPLES "enables options for building example/debugging programs" OFF)
 option(CLOGGER_NO_DEBUG_WARNING "don't output warning messages when running a non-release build of the library" OFF)
+option(CLOGGER_NO_SLEEP "don't sleep while waiting for messages; increases CPU usage" OFF)
 
 # TODO the source files can be set below, but those aren't inherited by other
 # libs that link this
@@ -66,8 +68,10 @@ install(TARGETS base_target
 )
 
 if(CMAKE_BUILD_TYPE STREQUAL ${CLOGGER_BUILD_VAR_RELEASE})
-    # strip the final release binary
-    target_link_options(base_target INTERFACE -s)
+	if(NOT CLOGGER_BUILD_NO_STRIP)
+    	# strip the final release binary
+    	target_link_options(base_target INTERFACE -s)
+	endif()
     # treat warnings as errors for release
     target_compile_options(base_target INTERFACE -Werror)
 else()
@@ -160,8 +164,12 @@ if(CLOGGER_ENABLE_VERBOSE_WARNING)
     target_compile_options(base_target INTERFACE -DCLOGGER_VERBOSE_WARNING)
 endif()
 
-if(CLOGGER_ENABLE_NO_WARNING)
+if(CLOGGER_NO_DEBUG_WARNING)
     target_compile_options(base_target INTERFACE -DCLOGGER_REMOVE_WARNING)
+endif()
+
+if(CLOGGER_NO_SLEEP)
+    target_compile_options(base_target INTERFACE -DCLOGGER_NO_SLEEP)
 endif()
 
 if(CLOGGER_BUILD_STATIC)

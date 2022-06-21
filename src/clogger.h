@@ -44,6 +44,10 @@ extern "C" {
 #define CLOGGER_ID_MAX_LEN   30
 #endif
 
+#ifndef CLOGGER_MAX_NUM_IDS
+#define CLOGGER_MAX_NUM_IDS 20
+#endif
+
 #ifndef CLOGGER_MAX_NUM_HANDLERS
 #define CLOGGER_MAX_NUM_HANDLERS 5
 #endif
@@ -68,24 +72,35 @@ extern "C" {
 
 #if CLOGGER_MAX_NUM_HANDLERS < 1
 #error "There must be at least one handler"
+#elif CLOGGER_MAX_NUM_HANDLERS <= 8
+typedef uint8_t t_handlerref;
+#elif CLOGGER_MAX_NUM_HANDLERS <= 16
+typedef uint16_t t_handlerref;
+#elif CLOGGER_MAX_NUM_HANDLERS <= 32
+typedef uint32_t t_handlerref;
+#else
+#error "Can't support more than 32 handlers"
 #endif
 
 
 // ################ HANDLER CODE ################
-int logger_create_console_handler(FILE *p_pOut);
-int logger_create_file_handler(char* p_sLogLocation, char* p_sLogName);
+t_handlerref logger_create_console_handler(FILE *p_pOut);
+t_handlerref logger_create_file_handler(const char* p_sLogLocation, const char* p_sLogName);
 
 #ifdef CLOGGER_GRAYLOG
 #define GRAYLOG_TCP 0
 #define GRAYLOG_UDP 1
-int logger_create_graylog_handler(char* p_sServer, int p_nPort, int p_nProtocol);
+t_handlerref logger_create_graylog_handler(const char* p_sServer, int p_nPort, int p_nProtocol);
 #endif
 
 
 // ################ ID CODE ################
-typedef int logger_id;
+typedef uint8_t logger_id;
 extern const logger_id CLOGGER_DEFAULT_ID;
-logger_id logger_create_id(char* p_sID);
+extern const t_handlerref CLOGGER_HANDLER_ERR;
+
+logger_id logger_create_id(const char* p_sID);
+logger_id logger_create_id_w_handlers(const char* p_sID, t_handlerref p_refHandlers);
 int logger_remove_id(logger_id id_ref);
 
 
@@ -115,7 +130,7 @@ int logger_free();
  * Returns 0 on success
  *
  */
-int logger_log_msg(int p_nLogLevel, char* msg, ...);
+int logger_log_msg(int p_nLogLevel, const char* msg, ...);
 
 /*!
  * Log a message to all available handlers using the specified logger_id.
@@ -123,7 +138,7 @@ int logger_log_msg(int p_nLogLevel, char* msg, ...);
  * Returns 0 on success
  *
  */
-int logger_log_msg_id(int p_nLogLevel, logger_id log_id, char* msg, ...);
+int logger_log_msg_id(int p_nLogLevel, logger_id log_id, const char* msg, ...);
 
 /*!
  * Returns the integer representation of the log level specified
@@ -132,7 +147,7 @@ int logger_log_msg_id(int p_nLogLevel, logger_id log_id, char* msg, ...);
  * Returns a negative value on failure
  *
  */
-int logger_log_str_to_int(char* p_sLogLevel);
+int logger_log_str_to_int(const char* p_sLogLevel);
 
 /*!
  * Returns an int indicating if the logger is active.
@@ -141,6 +156,10 @@ int logger_log_str_to_int(char* p_sLogLevel);
  *
  */
 int logger_is_running();
+
+#ifndef CLOGGER_NO_SLEEP
+int logger_set_sleep_time(unsigned int p_nMillisecondsToSleep);
+#endif
 
 #ifdef __cplusplus
 }

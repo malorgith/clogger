@@ -9,23 +9,25 @@ int main(__attribute__((unused))int argc, __attribute__((unused))char** argv) {
     }
 
     // create a file handler
-    if (logger_create_file_handler("./logs/", "simple_test.log")) {
+    t_handlerref t_refFileHandler = logger_create_file_handler("./logs/", "simple_test.log");
+    if (t_refFileHandler == CLOGGER_HANDLER_ERR) {
         fprintf(stderr, "Failed to open log file for writing.\n");
         logger_free();
         return 1;
     }
 
     // (optional) create a second handler that goes to stdout
-    if (logger_create_console_handler(stdout)) {
-        fprintf(stderr, "Failed to create console handler.\n");
+    t_handlerref t_refStdout = logger_create_console_handler(stdout);
+    if (t_refStdout == CLOGGER_HANDLER_ERR) {
+        fprintf(stderr, "Failed to create stdout console handler.\n");
         logger_free();
         return 1;
     }
 
     // (optional) create a logger_id to identify the calling thread/function
-    logger_id log_id = logger_create_id("custom id");
-    if (log_id < CLOGGER_DEFAULT_ID) {
-        fprintf(stderr, "Failed to create logger_id.\n");
+    logger_id stdout_id = logger_create_id_w_handlers("stdout", t_refStdout);
+    if (stdout_id == CLOGGER_MAX_NUM_IDS) {
+        fprintf(stderr, "Failed to create stdout logger_id.\n");
         logger_free();
         return 1;
     }
@@ -36,7 +38,7 @@ int main(__attribute__((unused))int argc, __attribute__((unused))char** argv) {
     }
 
     // log a message using a logger_id
-    if (logger_log_msg_id(LOGGER_INFO, log_id, "Logging a message using a logger_id")) {
+    if (logger_log_msg_id(LOGGER_INFO, stdout_id, "Logging a message using a logger_id")) {
         fprintf(stderr, "Failed to add second message to logger.\n");
     }
 

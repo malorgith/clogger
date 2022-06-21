@@ -22,6 +22,10 @@ static void *stress_test_logger(void *p_pData) {
     }
     else {
         id = logger_create_id(tmp_id);
+        if (id == CLOGGER_MAX_NUM_IDS) {
+            fprintf(stderr, "Thread %d failed to get a logger_id\n", t_nThread);
+            return NULL;
+        }
     }
     int t_nMaxMessages = (*my_params).m_nMessages;
 
@@ -35,6 +39,8 @@ static void *stress_test_logger(void *p_pData) {
         if (logger_log_msg_id(LOGGER_INFO, id, msg)) {
             printf("Thread %d: Got my first failure at message number %d\n", t_nThread, t_nCount);
             fflush(stdout);
+            sleep(1);
+            return NULL;
         }
     }
 
@@ -79,7 +85,8 @@ int main(__attribute__((unused))int argc, __attribute__((unused))char** argv) {
         fprintf(stderr, "Failed to initialize logger.\n");
         return 1;
     }
-    if (logger_create_console_handler(stdout)) {
+    t_handlerref t_refConsoleHandler = logger_create_console_handler(stdout);
+    if (t_refConsoleHandler == CLOGGER_HANDLER_ERR) {
         fprintf(stderr, "Failed to add console handler to logger.\n");
         logger_free();
         return 1;

@@ -8,7 +8,7 @@ extern "C" {
 
 #include "../logger_handler.h"
 
-int create_file_handler(log_handler *p_pHandler, char* p_sLogLocation, char* p_sLogName);
+int create_file_handler(log_handler *p_pHandler, const char* p_sLogLocation, const char* p_sLogName);
 
 #ifdef __cplusplus
 }
