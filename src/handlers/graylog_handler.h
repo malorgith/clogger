@@ -8,7 +8,7 @@ extern "C" {
 
 #include "../logger_handler.h"
 
-int create_graylog_handler(log_handler *p_pHandler, char* p_sServer, int p_nPort, int p_nProtocol);
+int create_graylog_handler(log_handler *p_pHandler, const char* p_sServer, int p_nPort, int p_nProtocol);
 
 #ifdef __cplusplus
 }

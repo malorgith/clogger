@@ -176,7 +176,7 @@ int _graylog_handler_write(log_handler *p_pHandler, const t_loggermsg* p_sMsg) {
 }
 
 // public function definitions
-int create_graylog_handler(log_handler *p_pHandler, char* p_sServer, int p_nPort, int p_nProtocol) {
+int create_graylog_handler(log_handler *p_pHandler, const char* p_sServer, int p_nPort, int p_nProtocol) {
 
     if (p_pHandler == NULL) {
         lgu_warn_msg("can't create Graylog handler in NULL ptr");
