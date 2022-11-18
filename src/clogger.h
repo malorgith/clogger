@@ -56,12 +56,6 @@ extern "C" {
 #define CLOGGER_BUFFER_SIZE 50
 #endif
 
-/*
- * In theory the compiler should catch any of the conditions below
- * based on items that are allocated using these variables, but we're
- * going to make sure.
- */
-
 #if CLOGGER_MAX_MESSAGE_SIZE < 10
 #error "Logger max message size must be 10 or greater"
 #endif

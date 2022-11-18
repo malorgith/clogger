@@ -18,7 +18,7 @@ typedef struct {
     int             m_nLogLevel;
     logger_id       m_refId;
     char*           m_sFormat;
-    struct tm       m_tmTime;
+    time_t          m_timeStamp;
 } t_loggermsg;
 
 #ifdef __cplusplus

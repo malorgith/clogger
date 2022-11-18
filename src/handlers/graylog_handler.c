@@ -19,13 +19,15 @@ static const char* g_sGraylogMsgFormat =
         "\"short_message\":\"%s\", "
         "\"host\":\"%s\", "
         "\"level\":%d, "
+        "\"timestamp\":%lu, "
         "\"_id\":\"%s\""
     "}";
 
 typedef struct {
     char                m_sHostname[MAX_HOSTNAME_LEN];
     int                 m_nSocket;
-    struct addrinfo*    m_pAddrinfo;
+    struct addrinfo*    m_pAddrinfo; // the working addrinfo to use for the connection
+    struct addrinfo*    m_pAddrFree; // the start of the addrinfo to free when done
 } grayloghandler_data;
 
 static const size_t g_sizeData = { sizeof(grayloghandler_data) };
@@ -61,10 +63,15 @@ int _graylog_handler_close(log_handler *p_pHandler) {
         }
     }
 
-    if (((grayloghandler_data*)p_pHandler->m_pHandlerData)->m_pAddrinfo != NULL) {
-        free(((grayloghandler_data*)p_pHandler->m_pHandlerData)->m_pAddrinfo);
+    if (((grayloghandler_data*)p_pHandler->m_pHandlerData)->m_pAddrFree != NULL) {
+        // free addrinfo using the original pointer
+        freeaddrinfo(((grayloghandler_data*)p_pHandler->m_pHandlerData)->m_pAddrFree);
+        ((grayloghandler_data*)p_pHandler->m_pHandlerData)->m_pAddrFree = NULL;
         ((grayloghandler_data*)p_pHandler->m_pHandlerData)->m_pAddrinfo = NULL;
     }
+
+    free(t_pData);
+    p_pHandler->m_pHandlerData = NULL;
 
     return t_nRtn;
 }
@@ -113,7 +120,8 @@ int _graylog_handler_open(log_handler *p_pHandler) {
     ((grayloghandler_data*)p_pHandler->m_pHandlerData)->m_nSocket = t_nSocket;
 
     // no longer need the addrinfo
-    free(((grayloghandler_data*)p_pHandler->m_pHandlerData)->m_pAddrinfo);
+    freeaddrinfo(((grayloghandler_data*)p_pHandler->m_pHandlerData)->m_pAddrFree);
+    ((grayloghandler_data*)p_pHandler->m_pHandlerData)->m_pAddrFree = NULL;
     ((grayloghandler_data*)p_pHandler->m_pHandlerData)->m_pAddrinfo = NULL;
 
     return 0;
@@ -155,6 +163,7 @@ int _graylog_handler_write(log_handler *p_pHandler, const t_loggermsg* p_sMsg) {
         p_sMsg,
         t_pData->m_sHostname,
         p_sMsg->m_nLogLevel,
+        p_sMsg->m_timeStamp,
         p_sMsg->m_sId
     )) {
         return 1;
@@ -228,7 +237,7 @@ int create_graylog_handler(log_handler *p_pHandler, const char* p_sServer, int p
         }
 
         if (t_pResult != NULL) {
-            free(t_pResult);
+            freeaddrinfo(t_pResult);
         }
         return 1;
     }
@@ -262,24 +271,17 @@ int create_graylog_handler(log_handler *p_pHandler, const char* p_sServer, int p
     grayloghandler_data *t_pData = (grayloghandler_data*)malloc(sizeof(grayloghandler_data));
     t_pData->m_nSocket = -1;
     t_pData->m_pAddrinfo = NULL;
+    t_pData->m_pAddrFree = NULL;
 
     // save the addrinfo that worked
-    t_pData->m_pAddrinfo = (struct addrinfo*)malloc(sizeof(struct addrinfo));
-    if (t_pData->m_pAddrinfo == NULL) {
-        lgu_warn_msg("Graylog handler failed to allocate space for address info");
-        free(t_pData);
-        return 1;
-    }
-    memcpy(t_pData->m_pAddrinfo, t_pResultItr, sizeof(struct addrinfo));
-
-    // free the original addrinfo now that we've saved the working info
-    freeaddrinfo(t_pResult);
+    t_pData->m_pAddrinfo = t_pResultItr;
+    t_pData->m_pAddrFree = t_pResult;
 
     // close the socket that was opened
     if (close(t_nSocket)) {
-        lgu_warn_msg("Graylog handler failed to close success socket test to Graylog");
+        lgu_warn_msg("Graylog handler failed to close successful socket test to Graylog");
         // TODO how do we handle this? for now we'll fail, I guess
-        free(t_pData->m_pAddrinfo);
+        freeaddrinfo(t_pResult);
         free(t_pData);
     }
 

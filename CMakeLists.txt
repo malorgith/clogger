@@ -8,10 +8,6 @@ set(CMAKE_C_STANDARD_REQUIRED True)
 
 set(CLOGGER_BUILD_VAR_RELEASE "Release")
 
-if (NOT CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE ${CLOGGER_BUILD_VAR_RELEASE} CACHE STRING "Debug, Release" FORCE)
-endif()
-
 include(CheckIncludeFiles)
 include(CheckSymbolExists)
 include(CheckTypeSize)
@@ -43,7 +39,6 @@ set(default_compile_opts -Wall -Wextra)
 
 option(CLOGGER_BUILD_SHARED "build the shared library; default" ON)
 option(CLOGGER_BUILD_STATIC "build a static version of the library" OFF)
-option(CLOGGER_BUILD_NO_STRIP "don't strip the Release binary" OFF)
 option(CLOGGER_ENABLE_GRAYLOG "build support for a Graylog handler" ON)
 option(CLOGGER_ENABLE_VERBOSE_WARNING "warning messages will be printed to stderr when functions fail" OFF)
 option(CLOGGER_BUILD_EXAMPLES "enables options for building example/debugging programs" OFF)
@@ -67,14 +62,17 @@ install(TARGETS base_target
     PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_INCLUDEDIR}
 )
 
-if(CMAKE_BUILD_TYPE STREQUAL ${CLOGGER_BUILD_VAR_RELEASE})
-	if(NOT CLOGGER_BUILD_NO_STRIP)
-    	# strip the final release binary
-    	target_link_options(base_target INTERFACE -s)
-	endif()
+if (NOT CMAKE_BUILD_TYPE)
+	set(CMAKE_BUILD_TYPE "Release")
+endif()
+
+if(
+	${CMAKE_BUILD_TYPE} STREQUAL ${CLOGGER_BUILD_VAR_RELEASE} OR
+	${CMAKE_BUILD_TYPE} STREQUAL "RelWithDebInfo"
+)
     # treat warnings as errors for release
     target_compile_options(base_target INTERFACE -Werror)
-else()
+elseif(${CMAKE_BUILD_TYPE} STREQUAL "Debug")
     # update the target names to use the debug names
     set(clogger_shared_target "${clogger_debug_target_name}")
     set(clogger_static_target "${clogger_debug_static_target_name}")

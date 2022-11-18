@@ -124,15 +124,7 @@ int _logger_log_msg(
      */
 
     if (g_bTimestampEnabled) {
-        time_t t_Time = time(NULL);
-        struct tm t_TimeData;
-        struct tm *t_pResult = localtime_r(&t_Time, &t_TimeData);
-        if (t_pResult != &t_TimeData) {
-            lgu_warn_msg("logger failed to get the time");
-            free(t_sFinalMessage);
-            return 1;
-        }
-        t_sFinalMessage->m_tmTime = t_TimeData;
+        t_sFinalMessage->m_timeStamp = time(NULL);
     }
 
     return (_logger_add_message(t_sFinalMessage));
@@ -152,9 +144,20 @@ int _logger_read_message() {
         return 1;
     }
 
+    struct tm t_TimeData;
+    if (g_bTimestampEnabled) {
+        time_t t_Time = t_pMsg->m_timeStamp;
+        struct tm *t_pResult = localtime_r(&t_Time, &t_TimeData);
+        if (t_pResult != &t_TimeData) {
+            lgu_warn_msg("logger failed to get the time");
+            free(t_pMsg);
+            return 1;
+        }
+    }
+
     // get the format string
     char formatted_string[50]; // FIXME size
-    if (lgf_format(g_lgformatter, formatted_string, &t_pMsg->m_tmTime, t_pMsg->m_nLogLevel)) {
+    if (lgf_format(g_lgformatter, formatted_string, &t_TimeData, t_pMsg->m_nLogLevel)) {
         lgu_warn_msg("failed to get the format for the message");
         free(t_pMsg);
         return 1;
