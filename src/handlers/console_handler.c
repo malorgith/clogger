@@ -61,6 +61,8 @@ int _console_handler_write(log_handler *p_pHandler, const t_loggermsg* p_sMsg) {
         p_sMsg->m_sId,
         p_sMsg->m_sMsg
     );
+    fflush(((consolehandler_data*)p_pHandler->m_pHandlerData)->m_pLog);
+
     return 0;
 }
 

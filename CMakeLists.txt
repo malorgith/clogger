@@ -63,7 +63,7 @@ install(TARGETS base_target
 )
 
 if (NOT CMAKE_BUILD_TYPE)
-	set(CMAKE_BUILD_TYPE "Release")
+    set(CMAKE_BUILD_TYPE ${CLOGGER_BUILD_VAR_RELEASE})
 endif()
 
 if(
@@ -162,7 +162,7 @@ if(CLOGGER_ENABLE_VERBOSE_WARNING)
     target_compile_options(base_target INTERFACE -DCLOGGER_VERBOSE_WARNING)
 endif()
 
-if(CLOGGER_NO_DEBUG_WARNING)
+if(CLOGGER_NO_DEBUG_WARNING OR (${CMAKE_BUILD_TYPE} STREQUAL "RelWithDebInfo"))
     target_compile_options(base_target INTERFACE -DCLOGGER_REMOVE_WARNING)
 endif()
 
