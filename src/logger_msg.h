@@ -1,10 +1,9 @@
-
-#ifndef LOGGER_MSG_H_INCLUDED
-#define LOGGER_MSG_H_INCLUDED
+#ifndef MALORGITH_CLOGGER_MSG_H_
+#define MALORGITH_CLOGGER_MSG_H_
 
 #ifdef __cplusplus
-extern "C" {
-#endif
+#pragma once
+#endif  // __cplusplus
 
 #include "logger_levels.h"
 
@@ -12,17 +11,25 @@ extern "C" {
 
 #include <time.h>
 
+#include "logger_defines.h"
+
+__MALORGITH_NAMESPACE_OPEN
+
 typedef struct {
-    char            m_sMsg[CLOGGER_MAX_MESSAGE_SIZE];
-    char            m_sId[CLOGGER_ID_MAX_LEN];
-    int             m_nLogLevel;
-    logger_id       m_refId;
-    char*           m_sFormat;
-    time_t          m_timeStamp;
+    /*! the fully formatted message */
+    char msg_[CLOGGER_MAX_MESSAGE_SIZE];
+    /*! the log id string for the message */
+    char id_[CLOGGER_ID_MAX_LEN];
+    /*! the log level of the message */
+    int log_level_;
+    /*! the reference to the logid_t for the message */
+    logid_t ref_id_;
+    /*! the format string that should be used for the message */
+    char* format_;
+    /*! the timestamp for the message */
+    time_t timestamp_;
 } t_loggermsg;
 
-#ifdef __cplusplus
-}
-#endif
+__MALORGITH_NAMESPACE_CLOSE
 
-#endif
+#endif  // MALORGITH_CLOGGER_MSG_H_

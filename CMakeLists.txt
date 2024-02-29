@@ -1,7 +1,12 @@
 cmake_minimum_required(VERSION 3.10)
 
 # set the project name
-project(clogger_prj VERSION 0.0.1)
+project(clogger_prj
+    VERSION 0.1.0
+    DESCRIPTION "A multi-threaded logger written in C"
+    HOMEPAGE_URL "https://github.com/malorgith/clogger"
+    LANGUAGES C CXX
+)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED True)
@@ -14,52 +19,49 @@ include(CheckTypeSize)
 include(GNUInstallDirs)
 
 set(logger_src_files
-    src/logger_util.c
-    src/logger.c
-    src/logger_buffer.c
-    src/logger_formatter.c
-    src/logger_handler.c
-    src/logger_id.c
-    src/logger_levels.c
-    src/logger_msg.c
-    src/handlers/console_handler.c
-    src/handlers/file_handler.c
+    ${PROJECT_SOURCE_DIR}/src/logger_defines.c
+    ${PROJECT_SOURCE_DIR}/src/logger_util.c
+    ${PROJECT_SOURCE_DIR}/src/logger_buffer.c
+    ${PROJECT_SOURCE_DIR}/src/logger_formatter.c
+    ${PROJECT_SOURCE_DIR}/src/logger_handler.c
+    ${PROJECT_SOURCE_DIR}/src/logger_id.c
+    ${PROJECT_SOURCE_DIR}/src/logger_levels.c
+    ${PROJECT_SOURCE_DIR}/src/logger_msg.c
+    ${PROJECT_SOURCE_DIR}/src/handlers/console_handler.c
+    ${PROJECT_SOURCE_DIR}/src/handlers/file_handler.c
+    ${PROJECT_SOURCE_DIR}/src/logger.c
 )
+set(clogger_public_h_location "${CMAKE_BINARY_DIR}/generated/clogger.h")
 
-set(clogger_default_target_name "clogger")
-set(clogger_debug_target_name "${clogger_default_target_name}d")
-set(clogger_static_target_name "${clogger_default_target_name}_static")
-set(clogger_debug_static_target_name "${clogger_debug_target_name}_static")
+set(clogger_shared_output_name "clogger$<$<CONFIG:Debug>:d>")
+set(clogger_static_output_name "${clogger_shared_output_name}_static")
 
-# init these to default values
-set(clogger_shared_target "${clogger_default_target_name}")
-set(clogger_static_target "${clogger_static_target_name}")
-
-set(default_compile_opts -Wall -Wextra)
-
-option(CLOGGER_BUILD_SHARED "build the shared library; default" ON)
-option(CLOGGER_BUILD_STATIC "build a static version of the library" OFF)
-option(CLOGGER_ENABLE_GRAYLOG "build support for a Graylog handler" ON)
+option(BUILD_SHARED_LIBS "build the shared library; default" ON)
+option(BUILD_STATIC_LIBS "build a static version of the library" OFF)
 option(CLOGGER_ENABLE_VERBOSE_WARNING "warning messages will be printed to stderr when functions fail" OFF)
 option(CLOGGER_BUILD_EXAMPLES "enables options for building example/debugging programs" OFF)
 option(CLOGGER_NO_DEBUG_WARNING "don't output warning messages when running a non-release build of the library" OFF)
-option(CLOGGER_NO_SLEEP "don't sleep while waiting for messages; increases CPU usage" OFF)
+option(CLOGGER_BUILD_CC "build the program using c++" OFF)
 
-# TODO the source files can be set below, but those aren't inherited by other
-# libs that link this
+set(CLOGGER_MAX_MESSAGE_SIZE "200" CACHE STRING "The maximum message size")
+set(CLOGGER_ID_MAX_LEN "40" CACHE STRING "The maximum ID length")
+set(CLOGGER_MAX_NUM_IDS "20" CACHE STRING "The maximum number of IDs that can be stored at the same time")
+set(CLOGGER_MAX_NUM_HANDLERS "5" CACHE STRING "The maximum number of handlers that can be stored at the same time")
+set(CLOGGER_BUFFER_SIZE "50" CACHE STRING "The number of messages that can be stored on the buffer before they're written")
+
 add_library(base_target INTERFACE)
-set_target_properties(base_target PROPERTIES
-    VERSION ${PROJECT_VERSION}
-    PUBLIC_HEADER "${PROJECT_SOURCE_DIR}/src/clogger.h"
-    LIBRARY_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/${CMAKE_INSTALL_LIBDIR}"
+target_compile_options(base_target INTERFACE
+    -Wall
+    -Wextra
+    -DCLOGGER_MAX_MESSAGE_SIZE=${CLOGGER_MAX_MESSAGE_SIZE}
+    -DCLOGGER_ID_MAX_LEN=${CLOGGER_ID_MAX_LEN}
+    -DCLOGGER_MAX_NUM_IDS=${CLOGGER_MAX_NUM_IDS}
+    -DCLOGGER_MAX_NUM_HANDLERS=${CLOGGER_MAX_NUM_HANDLERS}
+    -DCLOGGER_BUFFER_SIZE=${CLOGGER_BUFFER_SIZE}
 )
-target_compile_options(base_target INTERFACE ${default_compile_opts})
-
-# TODO archive destination and library destination aren't picked up automatically
-install(TARGETS base_target
-    ARCHIVE DESTINATION ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}
-    LIBRARY DESTINATION ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}
-    PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_INCLUDEDIR}
+target_include_directories(base_target INTERFACE
+    "src"
+    "${CMAKE_BINARY_DIR}/generated/"
 )
 
 if (NOT CMAKE_BUILD_TYPE)
@@ -67,19 +69,12 @@ if (NOT CMAKE_BUILD_TYPE)
 endif()
 
 if(
-	${CMAKE_BUILD_TYPE} STREQUAL ${CLOGGER_BUILD_VAR_RELEASE} OR
-	${CMAKE_BUILD_TYPE} STREQUAL "RelWithDebInfo"
+    ${CMAKE_BUILD_TYPE} STREQUAL ${CLOGGER_BUILD_VAR_RELEASE} OR
+    ${CMAKE_BUILD_TYPE} STREQUAL "RelWithDebInfo"
 )
     # treat warnings as errors for release
     target_compile_options(base_target INTERFACE -Werror)
-elseif(${CMAKE_BUILD_TYPE} STREQUAL "Debug")
-    # update the target names to use the debug names
-    set(clogger_shared_target "${clogger_debug_target_name}")
-    set(clogger_static_target "${clogger_debug_static_target_name}")
 endif()
-
-# need to put this after most definitions
-add_subdirectory(src/examples)
 
 set(CLOGGER_INCLUDE_FILES
     semaphore.h
@@ -135,27 +130,22 @@ set(CLOGGER_SYMBOL_CHECKS
 #check_type_size(bool SIZE_BOOL)
 #check_type_size("atomic_int" SIZE_ATOMICINT)
 
-if(CLOGGER_ENABLE_GRAYLOG)
-    set(logger_src_files ${logger_src_files} src/handlers/graylog_handler.c)
-    target_compile_options(base_target INTERFACE -DCLOGGER_GRAYLOG)
+if(CLOGGER_BUILD_CC)
+    set(clogger_cc_public_h_location "${CMAKE_BINARY_DIR}/generated/clogger.hpp")
+endif()
 
-    set(CLOGGER_INCLUDE_FILES ${CLOGGER_INCLUDE_FILES}
-        arpa/inet.h
-        netdb.h
-        sys/socket.h
-    )
+add_subdirectory(cmake) # must be before others to get graylog info
+include(cmake/AddLibraryTarget.cmake) # get function def
+if(CLOGGER_BUILD_CC)
+    add_subdirectory(src/cc)
+endif()
+add_subdirectory(src/test)
+add_subdirectory(src/examples)
 
-#   check_type_size(addrinfo SIZE_ADDRINFO)
-
-    set(CLOGGER_SYMBOL_CHECKS ${CLOGGER_SYMBOL_CHECKS}
-        getaddrinfo
-        freeaddrinfo
-        gai_strerror
-        memset
-        gethostname
-        close
-    )
-
+if(CLOGGER_ADD_MACROS)
+   target_compile_options(base_target INTERFACE
+       -DCLOGGER_BUILD_MACROS=1
+   )
 endif()
 
 if(CLOGGER_ENABLE_VERBOSE_WARNING)
@@ -166,29 +156,27 @@ if(CLOGGER_NO_DEBUG_WARNING OR (${CMAKE_BUILD_TYPE} STREQUAL "RelWithDebInfo"))
     target_compile_options(base_target INTERFACE -DCLOGGER_REMOVE_WARNING)
 endif()
 
-if(CLOGGER_NO_SLEEP)
-    target_compile_options(base_target INTERFACE -DCLOGGER_NO_SLEEP)
-endif()
-
-if(CLOGGER_BUILD_STATIC)
-    add_library(${clogger_static_target} STATIC ${logger_src_files})
-    target_link_libraries(${clogger_static_target} PUBLIC base_target)
-    # FIXME we don't want to install debug versions
-    install(TARGETS ${clogger_static_target}
-        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+if(BUILD_STATIC_LIBS)
+    CloggerAddLibraryTarget(
+        clogger_static
+        STATIC
+        "${logger_src_files}"
+        "${clogger_public_h_location}"
+        ${clogger_static_output_name}
     )
 endif()
 
-if(CLOGGER_BUILD_SHARED)
-    add_library(${clogger_shared_target} SHARED ${logger_src_files})
-    target_link_libraries(${clogger_shared_target} PUBLIC base_target)
-    # FIXME we don't want to install debug version
-    install(TARGETS ${clogger_shared_target}
-        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+if(BUILD_SHARED_LIBS)
+    CloggerAddLibraryTarget(
+        clogger_shared
+        SHARED
+        "${logger_src_files}"
+        "${clogger_public_h_location}"
+        ${clogger_shared_output_name}
     )
 endif()
 
-if(NOT CLOGGER_BUILD_SHARED AND NOT CLOGGER_BUILD_STATIC)
+if(NOT BUILD_SHARED_LIBS AND NOT BUILD_STATIC_LIBS)
     message(FATAL_ERROR "Must specify a library to build")
 endif()
 
@@ -205,4 +193,3 @@ foreach(SYMBOL_TEST ${CLOGGER_SYMBOL_CHECKS})
         message(FATAL_ERROR "Missing required symbol '${SYMBOL_TEST}'")
     endif()
 endforeach()
-

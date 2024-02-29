@@ -1,0 +1,10 @@
+// ################ macros #################
+#define logger_emergency(logid, args...) logger_log_msg_id(kCloggerEmergency, logid, args)
+#define logger_alert(logid, args...) logger_log_msg_id(kCloggerAlert, logid, args)
+#define logger_critical(logid, args...) logger_log_msg_id(kCloggerCritical, logid, args)
+#define logger_error(logid, args...) logger_log_msg_id(kCloggerError, logid, args)
+#define logger_warn(logid, args...) logger_log_msg_id(kCloggerWarn, logid, args)
+#define logger_notice(logid, args...) logger_log_msg_id(kCloggerNotice, logid, args)
+#define logger_info(logid, args...) logger_log_msg_id(kCloggerInfo, logid, args)
+#define logger_debug(logid, args...) logger_log_msg_id(kCloggerDebug, logid, args)
+

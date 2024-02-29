@@ -1,0 +1,5 @@
+// ################ GRAYLOG ################
+extern const int kGraylogTCP;
+extern const int kGraylogUDP;
+loghandler_t logger_create_graylog_handler(char const* graylog_url, int port, int protocol);
+

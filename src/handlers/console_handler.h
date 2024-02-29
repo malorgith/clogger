@@ -1,17 +1,17 @@
-
 #ifndef CONSOLE_HANDLER_H_INCLUDED
 #define CONSOLE_HANDLER_H_INCLUDED
 
 #ifdef __cplusplus
-extern "C" {
-#endif
+#pragma once
+#endif  // __cplusplus
 
-#include "../logger_handler.h"
+#include "logger_defines.h"
+#include "logger_handler.h"
 
-int create_console_handler(log_handler *p_pHandler, FILE *p_pOut);
+__MALORGITH_NAMESPACE_OPEN
 
-#ifdef __cplusplus
-}
-#endif
+int create_console_handler(log_handler *handler_ptr, FILE *file_out);
+
+__MALORGITH_NAMESPACE_CLOSE
 
 #endif

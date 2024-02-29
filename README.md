@@ -39,7 +39,6 @@ using a bitwise OR (`|`) to create a reference that points to multiple handlers.
 Example code can be found in `src/examples`.
 
 # TODO
-* Create version-specific symlinks when installing the shared library
 * Embed version/build info into compiled library
 * Install appropriate CMake files with build output
 * Implement `logger_formatter` objects better and allow users to modify their properties

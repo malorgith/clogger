@@ -1,0 +1,212 @@
+#ifndef MALORGITH_CLOGGER_H_
+#define MALORGITH_CLOGGER_H_
+
+#ifdef __cplusplus
+#pragma once
+#endif  // __cplusplus
+
+#include <stdint.h>
+#include <stdio.h>
+
+/*! \file clogger.h
+ *
+ * A threaded logger that places an emphasis on minimizing the
+ * time spent by the calling thread when logging a message.
+ *
+ */
+
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200112L
+#endif  // _POSIX_C_SOURCE
+
+#if _POSIX_C_SOURCE < 200112L
+#error "_POSIX_C_SOURCE must be at least 200112L"
+#endif  // _POSIX_C_SOURCE
+
+@BUILD_CLOGGER_NAMESPACE_OPEN@
+
+/*! the number of messages that can be placed on the buffer */
+extern int const kCloggerBufferSize;
+/*! the maximum length of a log ID */
+extern int const kCloggerIdMaxLen;
+/*! the maximum message length */
+extern int const kCloggerMaxMessageSize;
+/*! the maximum number of handlers */
+extern int const kCloggerMaxNumHandlers;
+/*! the maximum number of IDs */
+extern int const kCloggerMaxNumIds;
+
+/*! emergency log message value */
+extern int const kCloggerEmergency;
+/*! alert log message value */
+extern int const kCloggerAlert;
+/*! critical log message value */
+extern int const kCloggerCritical;
+/*! error log message value */
+extern int const kCloggerError;
+/*! warn log message value */
+extern int const kCloggerWarn;
+/*! notice log message value */
+extern int const kCloggerNotice;
+/*! info log message value */
+extern int const kCloggerInfo;
+/*! debug log message value */
+extern int const kCloggerDebug;
+
+typedef uint32_t loghandler_t;
+typedef uint8_t logid_t;
+
+/*!
+ * The ID to use for default messages, created automatically on init.
+ */
+extern logid_t const kCloggerDefaultId;
+
+/*!
+ * An invalid handler reference that indicates an error occurred.
+ */
+extern loghandler_t const kCloggerHandlerErr;
+
+
+// ################ HANDLER CODE ################
+/*!
+ * @brief Create a console handler that outputs to the FILE specified.
+ *
+ * @returns a loghandler_t for the new handler, or kCloggerHandlerErr on failure
+ */
+loghandler_t logger_create_console_handler(
+    /*! a pointer to the FILE; intended to be `stdout` or `stderr` */
+    FILE *out_file
+);
+
+/*!
+ * @brief Create a file handler that outputs to the file specified.
+ *
+ * @returns a loghandler_t for the new handler, or kCloggerHandlerErr on failure
+ */
+loghandler_t logger_create_file_handler(
+    /*! the directory to place the log file in */
+    char const* str_log_dir,
+    /*! the name of the log file */
+    char const* str_log_name
+);
+
+// ################ ID CODE ################
+
+/*!
+ * @brief Create a new logid_t with the name specified.
+ *
+ * @returns the logid_t of the new log ID, or kCloggerMaxNumIds on failure
+ */
+logid_t logger_create_id(
+    /*! the string to use as the new ID */
+    char const* str_log_id
+);
+
+/*!
+ * @brief Create a new logid_t that outputs to the specified handlers.
+ *
+ * @returns the logid_t of the new log ID, or kCloggerMaxNumIds on failure
+ */
+logid_t logger_create_id_w_handlers(
+    /*! the string to use as the new ID */
+    char const* str_log_id,
+    /*! the handlers to assign to the new logid_t */
+    loghandler_t log_handlers
+);
+
+/*!
+ * @brief Remove the logid_t from the stack.
+ *
+ * @returns 0 on success, > 0 on failure
+ */
+int logger_remove_id(
+    /*! the logid_t to remove */
+    logid_t id_ref
+);
+
+
+// ################ Logger Code ################
+
+/*!
+ * @brief Initialize variables and start the logger thread.
+ *
+ * @returns 0 on success
+ */
+int logger_init(
+    /*! the log level to enable */
+    int log_level
+);
+
+/*!
+ * @brief Stop the logger thread and free any used memory.
+ *
+ * @returns 0 on success
+ */
+int logger_free();
+
+/*!
+ * @brief Log a message to all available handlers using the default logid_t.
+ *
+ * @returns 0 on success
+ */
+int logger_log_msg(
+    /*! the log level of the message */
+    int log_level,
+    /*! the format of the message to log */
+    char const* msg,
+    /*! any variables used to format the log message */
+    ...
+);
+
+/*!
+ * @brief Log a message to all available handlers using the specified logid_t.
+ *
+ * @returns 0 on success
+ */
+int logger_log_msg_id(
+    /*! the log level of the message */
+    int log_level,
+    /*! the id to log the message as */
+    logid_t log_id,
+    /*! the format of the message to log */
+    char const* msg,
+    /*! any variables used to format the log message */
+    ...
+);
+
+/*!
+ * @brief Get the integer representation of a string log level.
+ *
+ * @returns a non-negative integer on success, a negative integer on failure
+ *
+ */
+int logger_log_str_to_int(
+    /*! the log level as a string */
+    char const* str_log_level
+);
+
+/*!
+ * @brief Check if the logger is running.
+ *
+ * @returns a positive integer if the logger is running, 0 if it isn't
+ */
+int logger_is_running();
+
+/*!
+ * @brief Update the logger to the new log level.
+ */
+int logger_set_log_level(
+    /*! new log level */
+    int log_level
+);
+
+/*!
+ * @brief Get the current log level.
+ */
+int logger_get_log_level();
+
+// optional features are below
+@BUILD_CLOGGER_MACROS@@BUILD_CLOGGER_SLEEP@@BUILD_GRAYLOG_HANDLER@
+@BUILD_CLOGGER_NAMESPACE_CLOSE@
+
+#endif  // MALORGITH_CLOGGER_H_

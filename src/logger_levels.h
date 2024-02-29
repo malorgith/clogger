@@ -1,29 +1,42 @@
-
-#ifndef LOGGER_LEVELS_H_INCLUDED
-#define LOGGER_LEVELS_H_INCLUDED
+#ifndef MALORGITH_CLOGGER_LEVELS_H_
+#define MALORGITH_CLOGGER_LEVELS_H_
 
 #ifdef __cplusplus
-extern "C" {
-#endif
+#pragma once
+#endif  // __cplusplus
 
-#include "clogger.h"
+//#include "clogger.h"
+#include "logger_defines.h"
 #include "logger_util.h"
+#include __MALORGITH_CLOGGER_INCLUDE
 
-extern const char* lgl_lchars[];
-extern const char* lgl_uchars[];
-extern const char* lgl_lstrs[];
-extern const char* lgl_ustrs[];
+__MALORGITH_NAMESPACE_OPEN
 
-/*
- * Checks to make sure the log level passed is in a valid
- * range. Uses LOGGER_MAX_LEVEL to determine maximum value.
+extern char const* lgl_lchars[];
+extern char const* lgl_uchars[];
+extern char const* lgl_lstrs[];
+extern char const* lgl_ustrs[];
+
+/*!
+ * @brief Check if the given log level is valid.
+ *
+ * @returns 0 if the level is valid, non-zero if it isn't
  */
-int lgl_check(int log_level);
+int lgl_check(
+    /*! the log level to check */
+    int log_level
+);
 
-int lgl_get_max_len(const char** lvl_strs);
+/*!
+ * @brief Find the maximum length from a given array of log level strings.
+ *
+ * @returns the length of the longest string, < 0 if there's an error
+ */
+int lgl_get_max_len(
+    /*! an array of log level strings to iterate over */
+    char const** lvl_strs
+);
 
-#ifdef __cplusplus
-}
-#endif
+__MALORGITH_NAMESPACE_CLOSE
 
-#endif
+#endif  // MALORGITH_CLOGGER_LEVELS_H_

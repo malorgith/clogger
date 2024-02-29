@@ -3,16 +3,25 @@
 
 #include <errno.h>
 #include <semaphore.h>
-#include <stdatomic.h>
 #include <stdlib.h>
 
+#ifdef __cplusplus
+#include <cstring>
+#else
+#include <string.h>
+#endif  // __cplusplus
+
+#include "logger_atomic.h"
+#include "logger_defines.h"
+
+// stop adding messages to buffer when there's this number or fewer free spaces
 #ifndef BUFFER_CLOSE_WARN
-#define BUFFER_CLOSE_WARN 5 // stop adding messages to buffer when there's this number or fewer free spaces
-#endif
+#define BUFFER_CLOSE_WARN 5
+#endif // BUFFER_CLOSE_WARN
 
 #ifndef LOGGER_BUFFER_MAX_NUM_BUFFERS
 #define LOGGER_BUFFER_MAX_NUM_BUFFERS 3
-#endif
+#endif // LOGGER_BUFFER_MAX_NUM_BUFFERS
 
 #if BUFFER_CLOSE_WARN > CLOGGER_BUFFER_SIZE
 #error "BUFFER_CLOSE_WARN must be less than CLOGGER_BUFFER_SIZE"
@@ -22,18 +31,23 @@
 #error "BUFFER_CLOSE_WARN must be > 0"
 #endif
 
+__MALORGITH_NAMESPACE_OPEN
+#ifdef __cplusplus
+namespace {
+#endif // __cplusplus
+
 typedef struct {
-    t_loggermsg*    messages[CLOGGER_BUFFER_SIZE];
-    sem_t           rlock;
-    sem_t           wlock;
-    atomic_int      amsgs;
-    atomic_int      arindx;
-    atomic_int      awindx;
+    t_loggermsg messages[CLOGGER_BUFFER_SIZE]; /*!< message storage */
+    sem_t rlock;  /*!< read lock */
+    sem_t wlock;  /*!< write lock */
+    MALORGITH_CLOGGER_ATOMIC_INT amsgs;  /*!< number of unread messages */
+    MALORGITH_CLOGGER_ATOMIC_INT arindx; /*!< read index */
+    MALORGITH_CLOGGER_ATOMIC_INT awindx; /*!< write index */
 } logger_buffer;
 
 // global variables
 static logger_buffer** buffers = { NULL };
-static sem_t* g_pStorageSem = { NULL };
+static sem_t* storage_sem = { NULL };
 
 // private function declarations
 static int _lgb_check_values(int bufref);
@@ -42,19 +56,19 @@ static int _lgb_get_new_index(int current_index);
 // private function definitions
 int _lgb_check_values(int bufref) {
 
-    char* err_msg = NULL;
+    char const* err_msg = NULL;
     if (buffers == NULL) {
-        err_msg = (char*) "there are no buffers defined.";
+        err_msg = "there are no buffers defined.";
     }
-    else if (g_pStorageSem == NULL) {
-        err_msg = (char*) "the global buffer lock doesn't exist.";
+    else if (storage_sem == NULL) {
+        err_msg = "the global buffer lock doesn't exist.";
     }
     else if (bufref >= 0) {
         if (bufref >= LOGGER_BUFFER_MAX_NUM_BUFFERS) {
             err_msg = "the buffer reference is too large";
         }
         else if (buffers[bufref] == NULL) {
-            err_msg = (char*) "the buffer referenced doesn't exist.";
+            err_msg = "the buffer referenced doesn't exist.";
         }
     }
 
@@ -73,6 +87,10 @@ static int _lgb_get_new_index(int current_index) {
     }
     return new_index;
 }
+
+#ifdef __cplusplus
+}  // namespace
+#endif  // __cplusplus
 
 // public functions
 int lgb_init() {
@@ -94,13 +112,13 @@ int lgb_init() {
         lgu_warn_msg("buffers have already been allocated.");
         return -1;
     }
-    else if (g_pStorageSem != NULL) {
+    else if (storage_sem != NULL) {
         lgu_warn_msg("the lock to modify storage already exists.");
         return -1;
     }
 
-    g_pStorageSem = (sem_t*) malloc(sizeof(sem_t));
-    sem_init(g_pStorageSem, 0, 0);
+    storage_sem = (sem_t*) malloc(sizeof(sem_t));
+    sem_init(storage_sem, 0, 0);
 
     buffers = (logger_buffer**) malloc(sizeof(logger_buffer*) * LOGGER_BUFFER_MAX_NUM_BUFFERS);
     if (buffers == NULL) {
@@ -111,7 +129,7 @@ int lgb_init() {
     for (int count = 0; count < LOGGER_BUFFER_MAX_NUM_BUFFERS; count++)
         buffers[count] = NULL;
 
-    sem_post(g_pStorageSem);
+    sem_post(storage_sem);
     int buffer_create_rtn = lgb_create_buffer();
     if (buffer_create_rtn < 0) {
         lgu_warn_msg("couldn't create the default buffer.");
@@ -129,7 +147,7 @@ int lgb_free() {
     }
 
     /*
-     * we don't need to get g_pStorageSem because it will be grabbed each time
+     * we don't need to get storage_sem because it will be grabbed each time
      * lgb_remove_buffer() is called
      */
     int rtn_val = 0;
@@ -142,8 +160,9 @@ int lgb_free() {
         }
     }
 
-    sem_destroy(g_pStorageSem);
-    free(g_pStorageSem);
+    sem_destroy(storage_sem);
+    free(storage_sem);
+    storage_sem = NULL;
 
     free(buffers);
     buffers = NULL;
@@ -158,7 +177,7 @@ int lgb_create_buffer() {
         return -1;
     }
 
-    sem_wait(g_pStorageSem);
+    sem_wait(storage_sem);
 
     int buf_count = -1;
     for (int count = 0; count < LOGGER_BUFFER_MAX_NUM_BUFFERS; count++) {
@@ -169,38 +188,35 @@ int lgb_create_buffer() {
     }
     if (buf_count == -1) {
         lgu_warn_msg("there's no space available for the new buffer.");
-        sem_post(g_pStorageSem);
+        sem_post(storage_sem);
         return -1;
     }
 
     buffers[buf_count] = (logger_buffer*) malloc(sizeof(logger_buffer));
     if (buffers[buf_count] == NULL) {
         lgu_warn_msg("failed to allocate space for new buffer.");
-        sem_post(g_pStorageSem);
+        sem_post(storage_sem);
         return -1;
     }
 
     buffers[buf_count]->arindx = 0;
     buffers[buf_count]->awindx = 0;
 
-    for (int count = 0; count < CLOGGER_BUFFER_SIZE; count++)
-        buffers[buf_count]->messages[count] = NULL;
-
     if (sem_init(&buffers[buf_count]->rlock, 0, 1)) {
         lgu_warn_msg_int("Failed to create the rlock; errno: %d.", errno);
-        sem_post(g_pStorageSem);
+        sem_post(storage_sem);
         return -1;
     }
 
     if (sem_init(&buffers[buf_count]->wlock, 0, 1)) {
         lgu_warn_msg_int("Failed to create the wlock; errno: %d.", errno);
-        sem_post(g_pStorageSem);
+        sem_post(storage_sem);
         return -1;
     }
 
     buffers[buf_count]->amsgs = 0;
 
-    sem_post(g_pStorageSem);
+    sem_post(storage_sem);
 
     return buf_count;
 }
@@ -211,27 +227,17 @@ int lgb_remove_buffer(int bufref) {
         return 1;
 
     // get the global lock to modify storage
-    sem_wait(g_pStorageSem);
+    sem_wait(storage_sem);
 
     // get both locks on the buffer that will be removed
     sem_wait(&buffers[bufref]->rlock);
     sem_wait(&buffers[bufref]->wlock);
 
     // look for any messages on the buffer and free them
-    int t_nMsgDropped = 0;
-    for (int count = 0; count < CLOGGER_BUFFER_SIZE; count++) {
-        if (buffers[bufref]->messages[count] != NULL) {
-            free(buffers[bufref]->messages[count]);
-            buffers[bufref]->messages[count] = NULL;
-            t_nMsgDropped++;
-        }
+    if (buffers[bufref]->amsgs) {
+        lgu_warn_msg_int("'%d' messages were dropped while buffer was being destroyed", buffers[bufref]->amsgs);
+        buffers[bufref]->amsgs = 0;
     }
-
-    if (t_nMsgDropped) {
-        lgu_warn_msg_int("'%d' messages were dropped while buffer was being destroyed", t_nMsgDropped);
-    }
-
-    buffers[bufref]->amsgs = 0;
 
     // destroy the buffer's locks
     sem_destroy(&buffers[bufref]->rlock);
@@ -242,7 +248,7 @@ int lgb_remove_buffer(int bufref) {
     buffers[bufref] = NULL;
 
     // let go of the storage modification lock
-    sem_post(g_pStorageSem);
+    sem_post(storage_sem);
 
     return 0;
 }
@@ -256,14 +262,14 @@ int lgb_add_message(int bufref, t_loggermsg* msg) {
 
     // make sure there aren't too many messages on the buffer
     if ((CLOGGER_BUFFER_SIZE - buffers[bufref]->amsgs) <= BUFFER_CLOSE_WARN) {
-        lgu_warn_msg("there are too many unread messages.");
+        lgu_warn_msg("there are too many unread messages");
         sem_post(&buffers[bufref]->wlock);
         return 1;
     }
 
-    buffers[bufref]->messages[buffers[bufref]->awindx] = msg; // add the message
+    buffers[bufref]->messages[buffers[bufref]->awindx] = *msg; // add the message
     buffers[bufref]->awindx = _lgb_get_new_index(buffers[bufref]->awindx); // increment the write index
-    buffers[bufref]->amsgs++; // increment the number of unread messages
+    ++buffers[bufref]->amsgs; // increment the number of unread messages
     sem_post(&buffers[bufref]->wlock); // release the lock
 
     return 0;
@@ -288,10 +294,9 @@ t_loggermsg* lgb_read_message(int bufref) {
     }
 
     int read_index = buffers[bufref]->arindx; // get the current read index
-    rtn_val = buffers[bufref]->messages[read_index]; // get the pointer to the message
-    buffers[bufref]->messages[read_index] = NULL; // remove the message from the buffer
+    rtn_val = &buffers[bufref]->messages[read_index]; // get the pointer to the message
     buffers[bufref]->arindx = _lgb_get_new_index(buffers[bufref]->arindx); // increment the read index
-    buffers[bufref]->amsgs--; // decrease count of unread messages
+    --buffers[bufref]->amsgs; // decrease count of unread messages
     sem_post(&buffers[bufref]->rlock); // release the lock
 
     return rtn_val;
@@ -325,7 +330,7 @@ int lgb_wait_for_messages(int bufref, int milliseconds_to_wait) {
     // get the current time
     struct timespec break_time = {0, 0};
 
-#ifdef CLOGGER_NO_SLEEP
+    #ifdef CLOGGER_NO_SLEEP
     if (clock_gettime(CLOCK_REALTIME, &break_time) == 1) {
         lgu_warn_msg("something went wrong getting the time");
         sem_post(&buffers[bufref]->rlock);
@@ -351,7 +356,7 @@ int lgb_wait_for_messages(int bufref, int milliseconds_to_wait) {
             return 1; // return 1 to indicate max time elapsed
         }
     }
-#else
+    #else
     lgu_add_to_time(&break_time, milliseconds_to_wait, min_milliseconds_wait, max_milliseconds_wait);
     // sleep for the time specified
     if (nanosleep(&break_time, NULL)) {
@@ -364,7 +369,7 @@ int lgb_wait_for_messages(int bufref, int milliseconds_to_wait) {
         sem_post(&buffers[bufref]->rlock);
         return 1; // max time elapsed
     }
-#endif
+    #endif  // CLOGGER_NO_SLEEP
 
     if (buffers[bufref]->amsgs > 0) {
         sem_post(&buffers[bufref]->rlock);
@@ -384,5 +389,6 @@ int logger_get_buffer_size() {
 int logger_get_buffer_close_warn() {
     return BUFFER_CLOSE_WARN;
 }
-#endif
+#endif // NDEBUG
 
+__MALORGITH_NAMESPACE_CLOSE

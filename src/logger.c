@@ -1,191 +1,136 @@
 
 #include "logger.h"
 
+#include <pthread.h>
+#include <semaphore.h>
+#include <stdlib.h>
+#include <string.h>     // for strcmp
+#ifndef NDEBUG
+#include <unistd.h>
+#endif  // NDEBUG
+
 #include "handlers/console_handler.h"
 #include "handlers/file_handler.h"
+#include "logger_atomic.h"
 #include "logger_buffer.h"
+#include "logger_defines.h"
 #include "logger_formatter.h"
 #ifdef CLOGGER_GRAYLOG
 #include "handlers/graylog_handler.h"
-#endif
-
-#include <errno.h>
-#include <pthread.h>
-#include <stdatomic.h>
-#include <stdlib.h>
-#include <string.h>     // for strcmp
+#endif  // CLOGGER_GRAYLOG
+#include __MALORGITH_CLOGGER_INCLUDE
 
 #define LOGGER_SLEEP_SECS 1
 
-// global variables
-static atomic_bool g_bExit = { false };
-static bool volatile g_logInit = { false };
-static int g_nLogLevel;
-static atomic_int g_nLogSleepTime = { 1 };
-static const unsigned int g_nMaxSleepTime = { 5000 };
-static pthread_t g_LogThread;
+__MALORGITH_NAMESPACE_OPEN
+#ifdef __cplusplus
+namespace {
+#endif  // __cplusplus
 
-static logger_formatter* g_lgformatter = { NULL };
+// global variables
+static bool volatile global_logger_running = { false };
+static int global_log_level = { LOGGER_INFO };
+#ifndef CLOGGER_NO_SLEEP
+static unsigned int const global_max_sleep_time = { 5000 };
+#endif  // CLOGGER_NO_SLEEP
+static pthread_t *global_log_thread = { NULL };
+
+static MALORGITH_CLOGGER_ATOMIC_BOOL global_exit = { false };
+static MALORGITH_CLOGGER_ATOMIC_BOOL global_err_exit = { false };
+//static MALORGITH_CLOGGER_ATOMIC_INT global_sleep_time = { 1 };
+static MalorgithAtomicInt global_sleep_time = { 1 };
+
+static logger_formatter* global_log_formatter = { NULL };
 
 static int buf_refid = { -1 };
 
 // TODO value below should be removed or determined based on what the handlers require
-static bool volatile g_bTimestampEnabled = { true };
+static bool volatile global_timestamp_enabled = { true };
 
-const logger_id CLOGGER_DEFAULT_ID = { 0 };
+/*
+typedef struct {
+    bool global_logger_running;
+    int global_log_level;
+    const unsigned int global_max_sleep_time;
+    pthread_t* global_log_thread;
+
+    MALORGITH_CLOGGER_ATOMIC_BOOL global_exit;
+    MALORGITH_CLOGGER_ATOMIC_INT global_sleep_time;
+
+    logger_formatter* global_log_formatter;
+
+    int buf_refid;
+
+    bool volatile global_timestamp_enabled;
+} logger_global_data;
+
+static logger_global_data globals = {
+    false,
+    -1,
+    5000,
+    NULL,
+    false,
+    1,
+    NULL,
+    -1,
+    true
+};
+*/
 
 // private function declarations
-static int _logger_add_message(t_loggermsg* msg);
-static int _logger_log_msg(
-    int log_level,
-    logger_id id,
-    char* format,
-    const char* msg,
-    va_list arg_list
-);
 static int _logger_read_message();
-static void *_logger_run(void *p_pData);
-static int _logger_timedwait(sem_t *p_pSem, int t_nWaitTimeSecs);
-
-// private function definitions
-int _logger_add_message(t_loggermsg* msg) {
-
-    if (!g_logInit) {
-        lgu_warn_msg("dropping message because logger isn't running");
-        free(msg);
-        return 1;
-    }
-    /*
-     * Allow messages to be added to the buffer when there are no
-     * handlers IF the logger has been initialized (above).
-     */
-
-    if (lgb_add_message(buf_refid, msg)) {
-        lgu_warn_msg("logger failed to add message to buffer");
-        // update message count on id since message wasn't added
-        lgi_remove_message(msg->m_refId);
-        return 1;
-    }
-
-    return 0;
-
-}
-
-int _logger_log_msg(
-    int log_level,
-    logger_id id,
-    __attribute__((unused))char* format,
-    const char* msg,
-    va_list arg_list
-) {
-
-    // TODO implement format parameter
-
-    // Check the level
-    if (log_level < 0) {
-        lgu_warn_msg("log level must be at least zero");
-        return 1;
-    }
-    else if (log_level > g_nLogLevel) {
-        // This message won't be logged based on the log level
-        return 0; // return 0 because no error occurred
-    }
-    else if (!g_logInit) {
-        lgu_warn_msg("can't add message; logger isn't running");
-        return 1;
-    }
-
-    t_loggermsg* t_sFinalMessage = (t_loggermsg*) malloc(sizeof(t_loggermsg));
-    va_list arg_list_copy;
-    va_copy(arg_list_copy, arg_list);
-    int format_rtn = vsnprintf(t_sFinalMessage->m_sMsg, CLOGGER_MAX_MESSAGE_SIZE, msg, arg_list_copy);
-    va_end(arg_list_copy);
-    if ((format_rtn >= CLOGGER_MAX_MESSAGE_SIZE) || (format_rtn < 0)) {
-        lgu_warn_msg("failed to format the message before adding it to the buffer");
-        free(t_sFinalMessage);
-        return 1;
-    }
-    t_sFinalMessage->m_nLogLevel = log_level;
-    t_sFinalMessage->m_sFormat = NULL;
-
-    if (lgi_add_message(id)) {
-        // failed to indicate there's a message waiting to use the ID
-        lgu_warn_msg("can't add message to buffer because the ID couldn't be incremented");
-        free(t_sFinalMessage);
-        return 1;
-    }
-    t_sFinalMessage->m_refId = id;
-
-    /*
-     * TODO
-     * Add support for querying all set handlers to see if any require a timestamp.
-     * If no handlers need one, then we don't need to set the data in the message struct.
-     * Right now we assume at least one handler requires a timestamp.
-     */
-
-    if (g_bTimestampEnabled) {
-        t_sFinalMessage->m_timeStamp = time(NULL);
-    }
-
-    return (_logger_add_message(t_sFinalMessage));
-}
+static void *_logger_run(void *thread_data);
 
 int _logger_read_message() {
-
-    if(!g_logInit)
+    if(!global_logger_running) {
         return 1;
-    else if (lgh_get_num_handlers() < 1)
+    } else if (lgh_get_num_handlers() < 1) {
         return 1;
+    }
 
     // Get the message at the current index
-    t_loggermsg* t_pMsg = lgb_read_message(buf_refid);
-    if (t_pMsg == NULL) {
+    t_loggermsg* msg = lgb_read_message(buf_refid);
+    if (msg == NULL) {
         lgu_warn_msg("failed to read a message from the buffer");
         return 1;
     }
 
-    struct tm t_TimeData;
-    if (g_bTimestampEnabled) {
-        time_t t_Time = t_pMsg->m_timeStamp;
-        struct tm *t_pResult = localtime_r(&t_Time, &t_TimeData);
-        if (t_pResult != &t_TimeData) {
+    struct tm time_data;
+    if (global_timestamp_enabled) {
+        time_t timestamp = msg->timestamp_;
+        struct tm *format_result = localtime_r(&timestamp, &time_data);
+        if (format_result != &time_data) {
             lgu_warn_msg("logger failed to get the time");
-            free(t_pMsg);
             return 1;
         }
     }
 
     // get the format string
     char formatted_string[50]; // FIXME size
-    if (lgf_format(g_lgformatter, formatted_string, &t_TimeData, t_pMsg->m_nLogLevel)) {
+    if (lgf_format(global_log_formatter, formatted_string, &time_data, msg->log_level_)) {
         lgu_warn_msg("failed to get the format for the message");
-        free(t_pMsg);
         return 1;
     }
-    t_pMsg->m_sFormat = formatted_string;
+    msg->format_ = formatted_string;
 
-    t_handlerref t_refHandlers = lgi_get_id(t_pMsg->m_refId, t_pMsg->m_sId);
+    loghandler_t t_refHandlers = lgi_get_id(msg->ref_id_, msg->id_);
     if (t_refHandlers == 0) {
         lgu_warn_msg("failed to convert ID from reference to string");
-        lgi_remove_message(t_pMsg->m_refId);
-        free(t_pMsg);
+        lgi_remove_message(msg->ref_id_);
         return 1;
     }
-    lgi_remove_message(t_pMsg->m_refId);
+    lgi_remove_message(msg->ref_id_);
 
     // write to the handlers specified by the message
-    if (lgh_write(t_refHandlers, t_pMsg)) {
+    if (lgh_write(t_refHandlers, msg)) {
         // we either failed to write to one or more handlers, or there were no open
         // handlers to write to
         lgu_warn_msg("logger thread failed to write to a handler");
     }
-    free(t_pMsg);                   // free the memory
-
     return 0;
 }
 
-void *_logger_run(__attribute__((unused))void *p_pData) {
-
+void *_logger_run(__attribute__((unused))void *thread_data) {
     bool t_bExit = false;
     while(true) {
 
@@ -193,7 +138,7 @@ void *_logger_run(__attribute__((unused))void *p_pData) {
         short t_nMessagesRead = 0;
 
         while(t_nMessagesRead < t_nMessagesBeforeCheck) {
-            int wait_rtn = lgb_wait_for_messages(buf_refid, g_nLogSleepTime);
+            int wait_rtn = lgb_wait_for_messages(buf_refid, global_sleep_time);
 
             if (wait_rtn == 0) {
                 // there's a message to read
@@ -217,7 +162,7 @@ void *_logger_run(__attribute__((unused))void *p_pData) {
             break;
 
         // Check if it's time to exit
-        if (g_bExit) {
+        if (global_exit) {
             // set t_bExit to true; we will loop one more time to get any remaining messages
             t_bExit = true;
         }
@@ -231,64 +176,104 @@ void *_logger_run(__attribute__((unused))void *p_pData) {
     bool* rtn_val = (bool*) malloc(sizeof(bool));
     *rtn_val = true;
     pthread_exit(rtn_val);
-
 }
 
-/*
- * TODO
- * This function was used when the handlers were stored here.
- *
- * It might be worth moving this to a more common area, such as
- * logger_util, so any file that deals with semaphores can use it.
- */
-__attribute__((unused))int _logger_timedwait(sem_t *p_pSem, int milliseconds_to_wait) {
+#ifdef __cplusplus
+}  // namespace
+#endif  // __cplusplus
 
-    static const int max_milliseconds_wait = 3000;
-    static const int min_milliseconds_wait = 1;
+const logid_t kCloggerDefaultId = { 0 };
 
-    struct timespec t_timespecWait;
-    if (clock_gettime(CLOCK_REALTIME, &t_timespecWait) == 1) {
-        lgu_warn_msg("failed to get the time before waiting for semaphore");
+// private function definitions
+int _logger_log_msg(
+    int log_level,
+    logid_t id,
+    __attribute__((unused))char* format,  // TODO(malorgith): implement
+    char const* msg,
+    va_list arg_list
+) {
+
+    // Check the level
+    if (log_level < 0) {
+        lgu_warn_msg("log level must be at least zero");
+        return 1;
+    }
+    else if (log_level > global_log_level) {
+        // This message won't be logged based on the log level
+        return 0;  // return 0 because no error occurred
+    }
+    else if (!global_logger_running) {
+        lgu_warn_msg("can't add message; logger isn't running");
         return 1;
     }
 
-    lgu_add_to_time(&t_timespecWait, milliseconds_to_wait, min_milliseconds_wait, max_milliseconds_wait);
-
-    int t_nSemRtn;
-    while((t_nSemRtn = sem_timedwait(p_pSem, &t_timespecWait)) == -1 && errno == EINTR)
-        continue;
-
-    if (t_nSemRtn == -1) {
-        // did not return 0; indicates an error
-        if (errno != ETIMEDOUT) {
-            // it didn't timeout, something else went wrong
-            perror("sem_timedwait");
-            return errno;
-        }
-        else {
-            // it timed out
-            lgu_warn_msg("timed out trying to get semaphore");
-            return errno;
-        }
+    // store the formatted message locally to ensure it doesn't exceed the size
+    char tmp_msg[CLOGGER_MAX_MESSAGE_SIZE];
+    va_list arg_list_copy;
+    va_copy(arg_list_copy, arg_list);
+    int format_rtn = vsnprintf(tmp_msg, CLOGGER_MAX_MESSAGE_SIZE, msg, arg_list_copy);
+    va_end(arg_list_copy);
+    if ((format_rtn >= CLOGGER_MAX_MESSAGE_SIZE) || (format_rtn < 0)) {
+        lgu_warn_msg("failed to format the message before adding it to the buffer");
+        return 1;
     }
 
+    if (lgi_add_message(id)) {
+        // failed to indicate there's a message waiting to use the ID
+        lgu_warn_msg("can't add message to buffer because the ID couldn't be incremented");
+        return 1;
+    }
+
+    t_loggermsg local_msg;
+    memcpy(local_msg.msg_, tmp_msg, sizeof(char) * CLOGGER_MAX_MESSAGE_SIZE);
+    local_msg.log_level_ = log_level;
+    local_msg.format_ = NULL;
+    local_msg.ref_id_ = id;
+
+    /*
+     * TODO
+     * Add support for querying all set handlers to see if any require a timestamp.
+     * If no handlers need one, then we don't need to set the data in the message struct.
+     * Right now we assume at least one handler requires a timestamp.
+     */
+
+    if (global_timestamp_enabled) {
+        local_msg.timestamp_ = time(NULL);
+    }
+
+    if (lgb_add_message(buf_refid, &local_msg)) {
+        lgu_warn_msg("logger failed to add message to buffer");
+        // update message count on id since message wasn't added
+        lgi_remove_message(local_msg.ref_id_);
+        return 1;
+    }
     return 0;
 }
 
 // public functions
-int logger_init(int p_nLogLevel) {
-
-#ifndef NDEBUG
-#ifndef CLOGGER_REMOVE_WARNING
+int logger_init(int log_level) {
+    #ifndef NDEBUG
+    #ifndef CLOGGER_REMOVE_WARNING
     fprintf(stderr, "\n(clogger) WARNING: library not compiled as release build; compile a release build to remove this warning\n\n");
-#endif
-#endif
+    #endif  // CLOGGER_REMOVE_WARNING
+    #endif  // NDEBUG
 
-    if (g_logInit) {
+    if (global_logger_running) {
         lgu_warn_msg("logger has already been initialized");
         return 1;
     }
-
+    else if (global_log_thread != NULL) {
+        lgu_warn_msg("logger thread isn't null");
+        return 1;
+    }
+    else if (log_level < 0) {
+        lgu_warn_msg("the log level must be at least zero");
+        return 1;
+    }
+    else if (log_level > LOGGER_MAX_LEVEL) {
+        lgu_warn_msg_int("the log level must be no greater than %d", LOGGER_MAX_LEVEL);
+        return 1;
+    }
     else if (! (LOGGER_SLEEP_SECS > 0)) {
         lgu_warn_msg("the amount of time the logger should sleep must be an integer greater than zero");
         return 1;
@@ -296,169 +281,179 @@ int logger_init(int p_nLogLevel) {
 
     if (lgi_init() != 0) {
         lgu_warn_msg("failed to initialize the logger IDs");
-        return 1;
+        global_err_exit = true;
+        return logger_free();
     }
 
     // init the handler
     if (lgh_init()) {
-        return 1;
+        global_err_exit = true;
+        return logger_free();
     }
 
     // create the default logger id, which is 'main'; must do after lgh_init()
-    if (logger_create_id((char*) "main") == CLOGGER_MAX_NUM_IDS) {
+    if (logger_create_id("main") == CLOGGER_MAX_NUM_IDS) {
         lgu_warn_msg("failed to create default logger ID");
-        return 1;
+        global_err_exit = true;
+        return logger_free();
     }
 
     // create the formatter
-    g_lgformatter = (logger_formatter*) malloc(sizeof(logger_formatter));
-    if (g_lgformatter == NULL) {
+    global_log_formatter = (logger_formatter*) malloc(sizeof(logger_formatter));
+    if (global_log_formatter == NULL) {
         lgu_warn_msg("failed to allocate space for the formatter");
-        return 1;
+        global_err_exit = true;
+        return logger_free();
     }
-    if (lgf_init(g_lgformatter)) {
+    if (lgf_init(global_log_formatter)) {
         lgu_warn_msg("failed to initialize formatter");
-        return 1;
+        global_err_exit = true;
+        return logger_free();
     }
-    lgf_set_datetime_format(g_lgformatter, "%Y-%m-%d %H:%M:%S");
+    lgf_set_datetime_format(global_log_formatter, "%Y-%m-%d %H:%M:%S");
 
     // Set the log level based on what the user specified
-    if (p_nLogLevel < 0) {
-        lgu_warn_msg("the log level must be at least zero");
-        return 1;
-    }
-    g_nLogLevel = p_nLogLevel;
+    global_log_level = log_level;
 
     // TODO make sure this value is >= 0 before changing it?
     buf_refid = lgb_init();
     if (buf_refid < 0) {
         lgu_warn_msg("failed to create the log buffer");
-        return 1;
+        global_err_exit = true;
+        return logger_free();
     }
 
-    g_bExit = false;
+    global_exit = false;
 
     // Start the log thread
-    g_logInit = true;
-    pthread_create(&g_LogThread, NULL, _logger_run, NULL);
+    global_logger_running = true;
+    global_log_thread = (pthread_t*) malloc(sizeof(pthread_t));
+    pthread_create(global_log_thread, NULL, _logger_run, NULL);
 
 #ifndef NDEBUG
 #ifndef CLOGGER_REMOVE_WARNING
     logger_log_msg(LOGGER_WARN, "Logger started with debugging built in");
-#endif
-#endif
+#endif  // CLOGGER_REMOVE_WARNING
+#endif  // NDEBUG
 
     return 0;
 }
 
 int logger_free() {
+    int return_code = 0;
 
-    int t_nRtn = 0;
-
-    if (!g_logInit)
+    if (!global_logger_running && !global_err_exit)
         return 1;
 
     // Tell the logging thread it's time to end
-    g_bExit = true;
+    global_exit = true;
 
-    bool* join_val = NULL;
-    pthread_join(g_LogThread, (void**) &join_val);
-    if (join_val == NULL) {
-        lgu_warn_msg("failed to get status from log thread");
-        fflush(stderr);
-    }
-    else {
-        if (*join_val != true) {
-            lgu_warn_msg("got non-true value on exit of log thread");
+    if (global_log_thread) {
+        bool* join_val = NULL;
+        pthread_join(*global_log_thread, (void**) &join_val);
+        if (join_val == NULL) {
+            lgu_warn_msg("failed to get status from log thread");
             fflush(stderr);
-            t_nRtn = 1;
         }
-        free(join_val);
+        else {
+            if (*join_val != true) {
+                lgu_warn_msg("got non-true value on exit of log thread");
+                fflush(stderr);
+                return_code = 1;
+            }
+            free(join_val);
+        }
+        free(global_log_thread);
+        global_log_thread = NULL;
     }
 
-    g_logInit = false;
+    global_logger_running = false;
 
     if (lgi_free() != 0) {
         lgu_warn_msg("failed to free the logger IDs");
-        t_nRtn = 1;
+        return_code = 1;
     }
 
     if (lgb_free()) {
         lgu_warn_msg("failed to free the log buffer");
         fflush(stderr);
-        t_nRtn = 1;
+        return_code = 1;
     }
     buf_refid = -1;
 
     // free the handler memory
     if (lgh_free()) {
-        t_nRtn = 1;
+        return_code = 1;
     }
 
     // free the formatters
     // FIXME semaphore(s) to modify values
     // TODO currently nothing to close(), but might change
-    lgf_free(g_lgformatter);
-    free(g_lgformatter);
-    g_lgformatter = NULL;
+    lgf_free(global_log_formatter);
+    free(global_log_formatter);
+    global_log_formatter = NULL;
 
-    return t_nRtn;
+    if (global_err_exit) {
+        return_code = 1;
+        global_err_exit = false;
+    }
+
+    return return_code;
 }
 
-int logger_log_str_to_int(const char* p_sLogLevel) {
-
-    if (strcmp(p_sLogLevel, "emergency") == 0) {
+int logger_log_str_to_int(char const* str_log_level) {
+    if (strcmp(str_log_level, "emergency") == 0) {
         return LOGGER_EMERGENCY;
     }
-    else if (strcmp(p_sLogLevel, "alert") == 0) {
+    else if (strcmp(str_log_level, "alert") == 0) {
         return LOGGER_ALERT;
     }
-    else if (strcmp(p_sLogLevel, "critical") == 0) {
+    else if (strcmp(str_log_level, "critical") == 0) {
         return LOGGER_CRITICAL;
     }
-    else if (strcmp(p_sLogLevel, "error") == 0) {
+    else if (strcmp(str_log_level, "error") == 0) {
         return LOGGER_ERROR;
     }
-    else if(strcmp(p_sLogLevel, "warn") == 0) {
+    else if(strcmp(str_log_level, "warn") == 0) {
         return LOGGER_WARN;
     }
-    else if (strcmp(p_sLogLevel, "notice") == 0) {
+    else if (strcmp(str_log_level, "notice") == 0) {
         return LOGGER_NOTICE;
     }
-    else if (strcmp(p_sLogLevel, "info") == 0) {
+    else if (strcmp(str_log_level, "info") == 0) {
         return LOGGER_INFO;
     }
-    else if (strcmp(p_sLogLevel, "debug") == 0) {
+    else if (strcmp(str_log_level, "debug") == 0) {
         return LOGGER_DEBUG;
     }
     else {
         #ifdef CLOGGER_VERBOSE_WARNING
-        int t_nMsgSize = 300;
-        char t_sLogMsg[t_nMsgSize];
-        char* t_sMsg = "Couldn't match specified level '%s' to a known log level";
-        int t_nFormatRtn = snprintf(t_sLogMsg, t_nMsgSize, t_sMsg, p_sLogLevel);
-        if ((t_nFormatRtn == 0) || (t_nFormatRtn >= t_nMsgSize)) {
+        int msg_max_size = 300;
+        char str_log_msg[msg_max_size];
+        char const* str_err_msg = "Couldn't match specified level '%s' to a known log level";
+        int format_rtn = snprintf(str_log_msg, msg_max_size, str_err_msg, str_log_level);
+        if ((format_rtn == 0) || (format_rtn >= msg_max_size)) {
             // failed to format the message
             lgu_warn_msg("couldn't match given string to a known log level");
         }
         else {
-            lgu_warn_msg(t_sMsg);
+            lgu_warn_msg(str_err_msg);
         }
-        #endif
+        #endif // CLOGGER_VERBOSE_WARNING
         return -1;
     }
 }
 
 int logger_is_running() {
-    if (g_logInit) return 1;
+    if (global_logger_running) return 1;
     else return 0;
 }
 
-int logger_log_msg(int p_nLogLevel, const char* msg, ...) {
+int logger_log_msg(int log_level, char const* msg, ...) {
     va_list arg_list;
     va_start(arg_list, msg);
     int rtn_val = _logger_log_msg(
-        p_nLogLevel,
+        log_level,
         0,   // ID
         NULL,   // format
         msg,
@@ -469,12 +464,12 @@ int logger_log_msg(int p_nLogLevel, const char* msg, ...) {
     return rtn_val;
 }
 
-int logger_log_msg_id(int p_nLogLevel, logger_id log_id, const char* msg, ...) {
+int logger_log_msg_id(int log_level, logid_t log_id, char const* msg, ...) {
 
     va_list arg_list;
     va_start(arg_list, msg);
     int rtn_val = _logger_log_msg(
-        p_nLogLevel,
+        log_level,
         log_id,   // ID
         NULL,   // format
         msg,
@@ -485,91 +480,72 @@ int logger_log_msg_id(int p_nLogLevel, logger_id log_id, const char* msg, ...) {
     return rtn_val;
 }
 
-#ifndef CLOGGER_NO_SLEEP
-int logger_set_sleep_time(unsigned int p_nMillisecondsToSleep) {
-    if (p_nMillisecondsToSleep > g_nMaxSleepTime) {
-        lgu_warn_msg_int("Max sleep time cannot exceed %d milliseconds", (int)g_nMaxSleepTime);
+int logger_get_log_level() {
+    return global_log_level;
+}
+
+int logger_set_log_level(int log_level) {
+    if (log_level < 0) {
+        lgu_warn_msg("Log level must be zero or greater.");
         return 1;
     }
-    g_nLogSleepTime = p_nMillisecondsToSleep;
+    else if (log_level > LOGGER_MAX_LEVEL) {
+        lgu_warn_msg_int("Log level must be less than or equal to %d", LOGGER_MAX_LEVEL);
+        return 1;
+    }
+    global_log_level = log_level;
     return 0;
 }
-#endif
 
 // handler code
-t_handlerref logger_create_console_handler(FILE *p_pOut) {
-
+loghandler_t logger_create_console_handler(FILE *out_file) {
     log_handler tmp_handler;
-    if (create_console_handler(&tmp_handler, p_pOut))
-        return CLOGGER_HANDLER_ERR;
+    if (create_console_handler(&tmp_handler, out_file))
+        return kCloggerHandlerErr;
 
-    t_handlerref t_refHandler = lgh_add_handler(&tmp_handler);
-    if (t_refHandler == CLOGGER_HANDLER_ERR) {
-        return CLOGGER_HANDLER_ERR;
+    loghandler_t t_refHandler = lgh_add_handler(&tmp_handler);
+    if (t_refHandler == kCloggerHandlerErr) {
+        return kCloggerHandlerErr;
     }
 
     // TODO for now we assume we want to add all handlers to the main id
-    if (lgi_add_handler(CLOGGER_DEFAULT_ID, t_refHandler)) {
+    if (lgi_add_handler(kCloggerDefaultId, t_refHandler)) {
         lgu_warn_msg("failed to add new console handler to main id");
         // TODO didn't actually fail to create handler...
-        return CLOGGER_HANDLER_ERR;
+        return kCloggerHandlerErr;
     }
 
     return t_refHandler;
 }
 
-t_handlerref logger_create_file_handler(const char* p_sLogLocation, const char* p_sLogName) {
-
+loghandler_t logger_create_file_handler(char const* str_log_dir, char const* str_log_name) {
     log_handler tmp_handler;
-    if (create_file_handler(&tmp_handler, p_sLogLocation, p_sLogName))
-        return CLOGGER_HANDLER_ERR;
+    if (create_file_handler(&tmp_handler, str_log_dir, str_log_name))
+        return kCloggerHandlerErr;
 
-    t_handlerref t_refHandler = lgh_add_handler(&tmp_handler);
-    if (t_refHandler == CLOGGER_HANDLER_ERR) {
-        return CLOGGER_HANDLER_ERR;
+    loghandler_t t_refHandler = lgh_add_handler(&tmp_handler);
+    if (t_refHandler == kCloggerHandlerErr) {
+        return kCloggerHandlerErr;
     }
 
     // TODO for now we assume we want to add all handlers to the main id
-    if (lgi_add_handler(CLOGGER_DEFAULT_ID, t_refHandler)) {
+    if (lgi_add_handler(kCloggerDefaultId, t_refHandler)) {
         lgu_warn_msg("failed to add new file handler to main id");
         // TODO didn't actually fail to create handler...
-        return CLOGGER_HANDLER_ERR;
+        return kCloggerHandlerErr;
     }
 
     return t_refHandler;
 }
-
-#ifdef CLOGGER_GRAYLOG
-t_handlerref logger_create_graylog_handler(const char* p_sServer, int p_nPort, int p_nProtocol) {
-
-    log_handler tmp_handler;
-    if (create_graylog_handler(&tmp_handler, p_sServer, p_nPort, p_nProtocol))
-        return CLOGGER_HANDLER_ERR;
-
-    t_handlerref t_refHandler = lgh_add_handler(&tmp_handler);
-    if (t_refHandler == CLOGGER_HANDLER_ERR) {
-        return CLOGGER_HANDLER_ERR;
-    }
-
-    // TODO for now we assume we want to add all handlers to the main id
-    if (lgi_add_handler(CLOGGER_DEFAULT_ID, t_refHandler)) {
-        lgu_warn_msg("failed to add new Graylog handler to main id");
-        // TODO didn't actually fail to create handler...
-        return CLOGGER_HANDLER_ERR;
-    }
-
-    return t_refHandler;
-}
-#endif
 
 // id code
-logger_id logger_create_id(const char* p_sID) {
-    logger_id t_refId = lgi_add_id(p_sID);
+logid_t logger_create_id(char const* str_log_id) {
+    logid_t t_refId = lgi_add_id(str_log_id);
     if (t_refId == CLOGGER_MAX_NUM_IDS)
         return CLOGGER_MAX_NUM_IDS;
 
     // TODO for this implementation, we will assume the id gets all available handlers
-    t_handlerref t_refAllHandlers = lgh_get_valid_handlers();
+    loghandler_t t_refAllHandlers = lgh_get_valid_handlers();
     if (lgi_add_handler(t_refId, t_refAllHandlers)) {
         lgu_warn_msg("failed to add all handlers to newly created id");
         return CLOGGER_MAX_NUM_IDS;
@@ -578,23 +554,24 @@ logger_id logger_create_id(const char* p_sID) {
     return t_refId;
 }
 
-logger_id logger_create_id_w_handlers(const char* p_sID, t_handlerref p_refHandlers) {
+logid_t logger_create_id_w_handlers(
+    char const* str_log_id,
+    loghandler_t log_handlers
+) {
     // TODO we could verify that the handlers we were given are valid...
-    return lgi_add_id_w_handler(p_sID, p_refHandlers);
+    return lgi_add_id_w_handler(str_log_id, log_handlers);
 }
 
-int logger_remove_id(logger_id id_ref) {
-    if (id_ref == CLOGGER_DEFAULT_ID) {
-        lgu_warn_msg("can't remove the default logger_id");
-        return -1;
+int logger_remove_id(logid_t id_ref) {
+    if (id_ref == kCloggerDefaultId) {
+        lgu_warn_msg("can't remove the default logid_t");
+        return 1;
     }
     return lgi_remove_id(id_ref);
 }
 
 #ifndef NDEBUG
-#include <unistd.h>
-
-int logger_print_id(logger_id id_ref) {
+int logger_print_id(logid_t id_ref) {
     char dest[CLOGGER_ID_MAX_LEN];
     lgi_get_id(id_ref, dest);
     printf("The logger ID is: %s\n", dest);
@@ -602,36 +579,34 @@ int logger_print_id(logger_id id_ref) {
 }
 
 bool logger_test_stop_logger() {
-
     // Tell the logger it's time to exit
     // This is only intended to be used with internal testing
-    g_bExit = true;
+    global_exit = true;
 
     return true;
 }
 
 bool custom_test_logger_large_add_message() {
-
     printf("\n");
 
 
-    int t_nBufferSize = logger_get_buffer_size();
-    int t_nWarnBuffer = logger_get_buffer_close_warn();
+    int buffer_size = logger_get_buffer_size();
+    int warn_buffer_value = logger_get_buffer_close_warn();
 
     // the following must be true for the test to work
-    if ((t_nBufferSize - (t_nWarnBuffer * 2)) <= 0) {
+    if ((buffer_size - (warn_buffer_value * 2)) <= 0) {
         printf("Cannot conduct test with current values\n");
         return false;
     }
-    short t_nCurrentIndex = 0;
+    short current_index = 0;
 
-    // fill the buffer with (t_nBufferSize - t_nWarnBuffer) messages, and let them get read
-    while (t_nCurrentIndex < (t_nBufferSize - t_nWarnBuffer)) {
-        printf("the value of t_nCurrentIndex is: %d\n", t_nCurrentIndex);
-        if (!logger_log_msg(LOGGER_INFO, (char*) "foobar")) {
+    // fill the buffer with (buffer_size - warn_buffer_value) messages, and let them get read
+    while (current_index < (buffer_size - warn_buffer_value)) {
+        printf("the value of current_index is: %d\n", current_index);
+        if (!logger_log_msg(LOGGER_INFO, "foobar")) {
             printf("Something went wrong before it should have\n");
         }
-        t_nCurrentIndex++;
+        current_index++;
     }
 
     // Tell the logger to stop running
@@ -641,19 +616,19 @@ bool custom_test_logger_large_add_message() {
     sleep(5);
 
     // When the index hits this number, we shouldn't be able to add more messages
-    int t_nWarnIndex = t_nCurrentIndex - t_nWarnBuffer;
-    int t_nMessagesToAdd = t_nWarnIndex + t_nWarnBuffer;
+    int warn_index = current_index - warn_buffer_value;
+    int messages_to_add = warn_index + warn_buffer_value;
 
-    for (short t_nCount = 0; t_nCount < t_nMessagesToAdd; t_nCount++) {
-        if (!logger_log_msg(LOGGER_INFO, (char*) "here")) {
+    for (short count = 0; count < messages_to_add; count++) {
+        if (!logger_log_msg(LOGGER_INFO, "here")) {
             printf("Failed too early\n");
             return false;
         }
     }
 
     // Now that we have reached the warn index, the next item should return false
-    bool t_bFinalReturn = logger_log_msg(LOGGER_INFO, (char*) "fail here");
-    if (t_bFinalReturn) {
+    bool final_return = logger_log_msg(LOGGER_INFO, "fail here");
+    if (final_return) {
         printf("This was supposed to be false.\n");
         return false;
     }
@@ -663,7 +638,40 @@ bool custom_test_logger_large_add_message() {
     }
 
     logger_free();
-
 }
-#endif
+#endif  // NDEBUG
 
+#ifdef CLOGGER_GRAYLOG
+loghandler_t logger_create_graylog_handler(char const* graylog_url, int port, int protocol) {
+    log_handler tmp_handler;
+    if (create_graylog_handler(&tmp_handler, graylog_url, port, protocol))
+        return kCloggerHandlerErr;
+
+    loghandler_t t_refHandler = lgh_add_handler(&tmp_handler);
+    if (t_refHandler == kCloggerHandlerErr) {
+        return kCloggerHandlerErr;
+    }
+
+    // TODO for now we assume we want to add all handlers to the main id
+    if (lgi_add_handler(kCloggerDefaultId, t_refHandler)) {
+        lgu_warn_msg("failed to add new Graylog handler to main id");
+        // TODO didn't actually fail to create handler...
+        return kCloggerHandlerErr;
+    }
+
+    return t_refHandler;
+}
+#endif  // CLOGGER_GRAYLOG
+
+#ifndef CLOGGER_NO_SLEEP
+int logger_set_sleep_time(unsigned int milliseconds_to_sleep) {
+    if (milliseconds_to_sleep > global_max_sleep_time) {
+        lgu_warn_msg_int("Max sleep time cannot exceed %d milliseconds", (int)global_max_sleep_time);
+        return 1;
+    }
+    global_sleep_time = milliseconds_to_sleep;
+    return 0;
+}
+#endif // CLOGGER_NO_SLEEP
+
+__MALORGITH_NAMESPACE_CLOSE

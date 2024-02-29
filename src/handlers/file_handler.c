@@ -1,65 +1,68 @@
 
-#include "file_handler.h"
-
-#include "../logger_util.h"
+#include "handlers/file_handler.h"
 
 #include <stdlib.h>
-#include <string.h> // memcpy()
+#include <string.h>  // memcpy()
 #include <sys/stat.h>   // mkdir()
+
+#include "logger_defines.h"
+#include "logger_util.h"
 
 #define MAX_LEN_FILE_W_PATH 80
 
+__MALORGITH_NAMESPACE_OPEN
+
 // global variables
 typedef struct {
-    FILE* m_pLog;
-    char m_sFileWithPath[MAX_LEN_FILE_W_PATH];
+    FILE* log_;
+    char file_path_str_[MAX_LEN_FILE_W_PATH];
 } filehandler_data;
 
-static const size_t g_sizeData = { sizeof(filehandler_data) };
+static const size_t kDataSize = { sizeof(filehandler_data) };
 
 // private function declarations
-static int _file_handler_close(log_handler *p_pHandler);
-static int _file_handler_isOpen(const log_handler *p_pHandler);
-static int _file_handler_open(log_handler *p_pHandler);
-static int _file_handler_write(log_handler* p_pHandler, const t_loggermsg* p_sMsg);
+static int _file_handler_close(log_handler *handler_ptr);
+static int _file_handler_isOpen(const log_handler *handler_ptr);
+static int _file_handler_open(log_handler *handler_ptr);
+static int _file_handler_write(log_handler* handler_ptr, const t_loggermsg* msg);
 
 // private function definitions
-int _file_handler_close(log_handler *p_pHandler) {
-    filehandler_data* t_pData = (filehandler_data*)p_pHandler->m_pHandlerData;
+int _file_handler_close(log_handler *handler_ptr) {
+    filehandler_data* data_ptr = (filehandler_data*)handler_ptr->handler_data_;
 
-    if (t_pData->m_pLog == NULL) {
+    if (data_ptr->log_ == NULL) {
         return 1;
     }
-    if (fclose(t_pData->m_pLog)) {
+    if (fclose(data_ptr->log_)) {
         // file didn't close successfully
         lgu_warn_msg("failed to close file handler");
     }
-    t_pData->m_pLog = NULL;
-    free(p_pHandler->m_pHandlerData);
-    p_pHandler->m_pHandlerData = NULL;
+    data_ptr->log_ = NULL;
+    free(handler_ptr->handler_data_);
+    handler_ptr->handler_data_ = NULL;
 
     return 0;
 }
 
-int _file_handler_isOpen(const log_handler *p_pHandler) {
-    if (((filehandler_data*)p_pHandler->m_pHandlerData)->m_pLog != NULL) return 1;
+int _file_handler_isOpen(const log_handler *handler_ptr) {
+    if (((filehandler_data*)handler_ptr->handler_data_)->log_ != NULL) return 1;
     else return 0;
 }
 
-int _file_handler_open(log_handler *p_pHandler) {
+int _file_handler_open(log_handler *handler_ptr) {
 
-    if (lgh_checks(p_pHandler, g_sizeData, "file handler"))
+    if (lgh_checks(handler_ptr, kDataSize, "file handler"))
         return 1;
 
-    filehandler_data* t_pData = (filehandler_data*)p_pHandler->m_pHandlerData;
-    if (t_pData->m_pLog != NULL) {
+    filehandler_data* data_ptr = (filehandler_data*)handler_ptr->handler_data_;
+    if (data_ptr->log_ != NULL) {
         lgu_warn_msg("can't open log because it's already open");
         return 1;
     }
 
-    t_pData->m_pLog = fopen(t_pData->m_sFileWithPath, "a"); // TODO make variable
+    data_ptr->log_ = fopen(data_ptr->file_path_str_, "a"); // TODO make variable
 
-    if (t_pData->m_pLog == NULL) {
+    if (data_ptr->log_ == NULL) {
         // Failed to open the log file
         // TODO include full path to file
         lgu_warn_msg("failed to open log file");
@@ -68,33 +71,33 @@ int _file_handler_open(log_handler *p_pHandler) {
     return 0;
 }
 
-int _file_handler_write(log_handler *p_pHandler, const t_loggermsg* p_sMsg) {
+int _file_handler_write(log_handler *handler_ptr, const t_loggermsg* msg) {
 
-    if (lgh_checks(p_pHandler, g_sizeData, "file handler"))
+    if (lgh_checks(handler_ptr, kDataSize, "file handler"))
         return 1;
-    else if (p_sMsg == NULL) {
+    else if (msg == NULL) {
         lgu_warn_msg("file handler given NULL message to log");
         return 1;
     }
 
-    filehandler_data *t_pData = (filehandler_data*)p_pHandler->m_pHandlerData;
+    filehandler_data *data_ptr = (filehandler_data*)handler_ptr->handler_data_;
 
-    fprintf(t_pData->m_pLog, "%s%s %s\n", p_sMsg->m_sFormat, p_sMsg->m_sId, p_sMsg->m_sMsg);
-    fflush(t_pData->m_pLog);
+    fprintf(data_ptr->log_, "%s%s %s\n", msg->format_, msg->id_, msg->msg_);
+    fflush(data_ptr->log_);
 
     return 0;
 }
 
 // public function definitions
-int create_file_handler(log_handler *p_pHandler, const char* p_sLogLocation, const char* p_sLogName) {
+int create_file_handler(log_handler *handler_ptr, char const* log_location_str, char const* log_name_str) {
 
     // for now we will allow the location to be NULL to indicate current directory
 
-    if (p_pHandler == NULL) {
+    if (handler_ptr == NULL) {
         lgu_warn_msg("cannot create file handler in NULL ptr");
         return 1;
     }
-    else if (p_sLogName == NULL) {
+    else if (log_name_str == NULL) {
         lgu_warn_msg("the log name must be supplied");
         return 1;
     }
@@ -109,65 +112,65 @@ int create_file_handler(log_handler *p_pHandler, const char* p_sLogLocation, con
      * it while allowing the char* params to come in as const.
      */
 
-    static const int m_nMaxPathLen = 50;
-    static const int m_nMaxLogNameLen = 30;
+    static const int kMaxPathLen = 50;
+    static const int kMaxLogNameLen = 30;
 
-    static const char* m_sDefaultLogDir = "./";
+    static char const* kDefaultLogDir = "./";
 
-    char t_sLogDir[m_nMaxPathLen];
-    char t_sLogName[m_nMaxLogNameLen];
+    char log_dir_str[kMaxPathLen];
+    char log_name_char[kMaxLogNameLen];
 
-    // Check if p_sLogLocation is a directory
-    if (p_sLogLocation != NULL) {
-        if (lgu_is_dir(p_sLogLocation)) {
+    // Check if log_location_str is a directory
+    if (log_location_str != NULL) {
+        if (lgu_is_dir(log_location_str)) {
             // directory does not exist; try to create it
-            int t_nDirRtn = mkdir(p_sLogLocation, 0755);
-            if (t_nDirRtn != 0) {
+            int mkdir_rtn = mkdir(log_location_str, 0755);
+            if (mkdir_rtn != 0) {
                 lgu_warn_msg("failed to create log directory");
                 return 1;
             }
         }
         else {
             // directory exists; check if we have write perms
-            if (lgu_can_write(p_sLogLocation)) {
-                fprintf(stderr, "ERROR! Do not have permission to write logs to '%s'\n", p_sLogLocation);
+            if (lgu_can_write(log_location_str)) {
+                fprintf(stderr, "ERROR! Do not have permission to write logs to '%s'\n", log_location_str);
                 return 1;
             }
         }
-        static const char* t_sErrMsg = "failed to store the log path given";
-        if (lgu_wsnprintf(t_sLogDir, m_nMaxPathLen, t_sErrMsg, "%s", p_sLogLocation)) return 1;
+        static char const* kErrMsg = "failed to store the log path given";
+        if (lgu_wsnprintf(log_dir_str, kMaxPathLen, kErrMsg, "%s", log_location_str)) return 1;
     }
     else {
         // put logs in default log dir
-        static const char* t_sErrMsg = "failed to store the default log directory in file handler";
-        if (lgu_wsnprintf(t_sLogDir, m_nMaxPathLen, t_sErrMsg, "%s", m_sDefaultLogDir)) return 1;
+        static char const* kErrMsg = "failed to store the default log directory in file handler";
+        if (lgu_wsnprintf(log_dir_str, kMaxPathLen, kErrMsg, "%s", kDefaultLogDir)) return 1;
     }
 
     // store the log file name
     {
-        static const char* t_sErrMsg = "failed to store the log name given";
-        if (lgu_wsnprintf(t_sLogName, m_nMaxLogNameLen, t_sErrMsg, "%s", p_sLogName)) return 1;
+        static char const* kErrMsg = "failed to store the log name given";
+        if (lgu_wsnprintf(log_name_char, kMaxLogNameLen, kErrMsg, "%s", log_name_str)) return 1;
     }
 
     // allocate space to store data specific to this type of handler
-    filehandler_data* t_pData = (filehandler_data*)malloc(sizeof(filehandler_data));
-    if (t_pData == NULL) {
+    filehandler_data* data_ptr = (filehandler_data*)malloc(sizeof(filehandler_data));
+    if (data_ptr == NULL) {
         // failed to allocate space for the data
         return 1;
     }
-    t_pData->m_pLog = NULL;
+    data_ptr->log_ = NULL;
 
     // build the full path to the file
     {
-        static const char* t_sErrMsg = "failed to combine and store log path and file name";
-        static const int t_nSize = sizeof(char) * MAX_LEN_FILE_W_PATH;
+        static char const* kErrMsg = "failed to combine and store log path and file name";
+        static const int file_path_max_size = sizeof(char) * MAX_LEN_FILE_W_PATH;
         if (lgu_wsnprintf(
-            t_pData->m_sFileWithPath,
-            t_nSize,
-            t_sErrMsg,
+            data_ptr->file_path_str_,
+            file_path_max_size,
+            kErrMsg,
             "%s/%s",
-            t_sLogDir,
-            t_sLogName
+            log_dir_str,
+            log_name_char
         )) {
             return 1;
         }
@@ -180,14 +183,14 @@ int create_file_handler(log_handler *p_pHandler, const char* p_sLogLocation, con
         &_file_handler_isOpen,
         true,
         true,
-        t_pData
+        data_ptr
     };
-    
     // TODO can we check perms on the file without opening it? should we open and close
     // quickly to test?
 
-    memcpy(p_pHandler, &t_structHandler, sizeof(log_handler));
+    memcpy(handler_ptr, &t_structHandler, sizeof(log_handler));
 
     return 0;
 }
 
+__MALORGITH_NAMESPACE_CLOSE

@@ -3,13 +3,17 @@
 
 #include <string.h>
 
+#include "logger_defines.h"
+
+__MALORGITH_NAMESPACE_OPEN
+
 // global vars
 
 /*
  * Note that the 'chars' are actually strings. This is to make it so
  * '%s' can consistently be used in formatters to output the value.
  */
-const char* lgl_lchars[] = {
+char const* lgl_lchars[] = {
     "!",
     "a",
     "c",
@@ -20,7 +24,7 @@ const char* lgl_lchars[] = {
     "d"
 };
 
-const char* lgl_uchars[] = {
+char const* lgl_uchars[] = {
     "!",
     "A",
     "C",
@@ -31,7 +35,7 @@ const char* lgl_uchars[] = {
     "D"
 };
 
-const char* lgl_lstrs[] = {
+char const* lgl_lstrs[] = {
     "emergency",
     "alert",
     "critical",
@@ -42,7 +46,7 @@ const char* lgl_lstrs[] = {
     "debug"
 };
 
-const char* lgl_ustrs[] = {
+char const* lgl_ustrs[] = {
     "EMERGENCY",
     "ALERT",
     "CRITICAL",
@@ -66,7 +70,7 @@ int lgl_check(int log_level) {
     return 0;
 }
 
-int lgl_get_max_len(const char** lvl_strs) {
+int lgl_get_max_len(char const** lvl_strs) {
     if (lvl_strs == NULL)
         return -1;
 
@@ -80,3 +84,4 @@ int lgl_get_max_len(const char** lvl_strs) {
     return longest_len;
 }
 
+__MALORGITH_NAMESPACE_CLOSE

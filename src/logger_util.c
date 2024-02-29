@@ -1,14 +1,42 @@
 
 #include "logger_util.h"
 
-#include <stdarg.h> // va_list and others
-#include <stdio.h> //fprintf(), snprintf()
+#include <errno.h>
+#include <semaphore.h>
+#include <stdarg.h>
+#include <stdio.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
+__MALORGITH_NAMESPACE_OPEN
+
+/*!
+ * @brief Get the number of bytes in the file.
+ *
+ * @returns the number of bytes in the file, < 0 on failure
+ */
+static int _lgu_get_size(
+    /*! the path to the file to get the size of */
+    char const* str_file_path
+);
+
+/*!
+ * @brief Check if the given path is a file.
+ *
+ * @returns true if the path is to a file, false otherwise
+ */
+static bool _lgu_is_file(
+    /*! the path to the file */
+    char const* str_file_path
+);
 
 // public functions
-int lgu_add_to_time(struct timespec *p_pTspec, int ms_to_add, int min_ms, int max_ms) {
+int lgu_add_to_time(
+    struct timespec *ptr_timespec,
+    int ms_to_add,
+    int min_ms,
+    int max_ms
+) {
 
     if (ms_to_add > max_ms) {
         lgu_warn_msg_int("Maximum time to wait is %d milliseconds", max_ms);
@@ -29,78 +57,116 @@ int lgu_add_to_time(struct timespec *p_pTspec, int ms_to_add, int min_ms, int ma
     sleep_time_nsecs *= (long) 1000000;
 
     // add the time to the struct
-    p_pTspec->tv_sec += sleep_time_secs;
-    p_pTspec->tv_nsec += sleep_time_nsecs;
-    if (p_pTspec->tv_nsec >= (long) 1000000000) {
-        p_pTspec->tv_nsec -= (long) 1000000000;
-        p_pTspec->tv_sec += 1;
+    ptr_timespec->tv_sec += sleep_time_secs;
+    ptr_timespec->tv_nsec += sleep_time_nsecs;
+    if (ptr_timespec->tv_nsec >= (long) 1000000000) {
+        ptr_timespec->tv_nsec -= (long) 1000000000;
+        ptr_timespec->tv_sec += 1;
     }
 
     return 0;
 }
 
-int lgu_can_write(const char* p_sFileWithPath) {
-
-    int t_nRtn = access(p_sFileWithPath, W_OK);
-    return t_nRtn;
+int lgu_can_write(char const* str_file_path) {
+    int return_val = access(str_file_path, W_OK);
+    return return_val;
 }
 
-int lgu_get_size(const char* p_sFilename) {
-
+__attribute__((unused))int _lgu_get_size(char const* str_file_path) {
     // get the size (in bytes) of the file
-
     struct stat t_statStruct;
-    if (stat(p_sFilename, &t_statStruct) == -1) {
+    if (stat(str_file_path, &t_statStruct) == -1) {
         return -1;
     }
     else {
         // get the size from the stat struct
         return t_statStruct.st_size;
     }
-
     // shouldn't be possible to get here
     return -1;
 }
 
-int lgu_is_dir(const char* p_sDirectory) {
-
-    struct stat sb;
-
-    if (stat(p_sDirectory, &sb) == -1)
+int lgu_is_dir(char const* str_dir_path) {
+    struct stat stat_struct;
+    if (stat(str_dir_path, &stat_struct) == -1) {
         return -1;
-    else
-        if (S_ISDIR(sb.st_mode))
+    }
+    else {
+        if (S_ISDIR(stat_struct.st_mode)) {
             return 0;
-        else
+        }
+        else {
             return 1;
-
+        }
+    }
 }
 
-bool lgu_is_file(const char* p_sFilename) {
-
-	struct stat t_statBuf;
-	if (stat(p_sFilename, &t_statBuf) == -1)
+__attribute__((unused))bool _lgu_is_file(char const* str_file_path) {
+	struct stat stat_struct;
+	if (stat(str_file_path, &stat_struct) == -1) {
 	    return false;
-	else
-	    if (S_ISREG(t_statBuf.st_mode))
+    }
+	else {
+	    if (S_ISREG(stat_struct.st_mode)) {
 	        return true;
-	    else
+        }
+	    else {
 	        return false;
+        }
+    }
+}
 
+int lgu_timedwait(sem_t *sem_ptr, int milliseconds_to_wait) {
+    static const int max_milliseconds_wait = 3000;
+    static const int min_milliseconds_wait = 1;
+
+    struct timespec t_timespecWait;
+    if (clock_gettime(CLOCK_REALTIME, &t_timespecWait) == 1) {
+        lgu_warn_msg("failed to get the time before waiting for semaphore");
+        return -1;
+    }
+
+    lgu_add_to_time(&t_timespecWait, milliseconds_to_wait, min_milliseconds_wait, max_milliseconds_wait);
+
+    int t_nSemRtn;
+    while((t_nSemRtn = sem_timedwait(sem_ptr, &t_timespecWait)) == -1 && errno == EINTR)
+        continue;
+
+    if (t_nSemRtn == -1) {
+        // did not return 0; indicates an error
+        if (errno != ETIMEDOUT) {
+            // it didn't timeout, something else went wrong
+            perror("sem_timedwait");
+            return -1;
+        }
+        else {
+            // it timed out
+            lgu_warn_msg("timed out trying to get semaphore");
+            return 1;
+        }
+    }
+
+    return 0;  // didn't timeout
 }
 
 /*
  * snprintf() that checks the result and prints a warning message (using
  * lgu_warn_msg()) if string failed to copy.
  */
-int lgu_wsnprintf(char* p_sDest, int p_nMaxSize, const char* p_sWarnMsg, const char* p_sFormat, ...) {
-    va_list t_listArgs;
-    va_start(t_listArgs, p_sFormat);
-    int t_nSnrtn = vsnprintf(p_sDest, p_nMaxSize, p_sFormat, t_listArgs);
-    va_end(t_listArgs);
+int lgu_wsnprintf(
+    char* dest,
+    int max_size,
+    char const* str_warn_msg,
+    char const* format,
+    ...
+) {
+    va_list list_args;
+    va_start(list_args, format);
+    int sn_rtn = vsnprintf(dest, max_size, format, list_args);
+    va_end(list_args);
 
-    if ((t_nSnrtn < 0) || (t_nSnrtn >= p_nMaxSize)) {
-        lgu_warn_msg(p_sWarnMsg);
+    if ((sn_rtn < 0) || (sn_rtn >= max_size)) {
+        lgu_warn_msg(str_warn_msg);
         return 1;
     }
 
@@ -111,44 +177,43 @@ int lgu_wsnprintf(char* p_sDest, int p_nMaxSize, const char* p_sWarnMsg, const c
 /*
  * Print the error message to stderr
  */
-void lgu_warn_msg(const char* p_sMsg) {
-    fprintf(stderr, "clogger error: %s\n", p_sMsg);
+void lgu_warn_msg(char const* msg) {
+    fprintf(stderr, "clogger error: %s\n", msg);
     fflush(stderr);
 }
 
-void lgu_warn_msg_int(const char* p_sMsgFormat, const int p_nPut) {
-    static const int t_nMaxMsgSize = 300;
-    char t_sMsg[t_nMaxMsgSize];
+void lgu_warn_msg_int(char const* msg_format, const int int_input) {
+    static const int max_msg_size = 300;
+    char out_msg[max_msg_size];
 
-    int t_nFormatRtn = snprintf(t_sMsg, t_nMaxMsgSize, p_sMsgFormat, p_nPut);
-    if ((t_nFormatRtn == 0) || (t_nFormatRtn >= t_nMaxMsgSize)) {
+    int format_rtn = snprintf(out_msg, max_msg_size, msg_format, int_input);
+    if ((format_rtn == 0) || (format_rtn >= max_msg_size)) {
         // failed to format the message
-        lgu_warn_msg("Encountered an error, but failed to format output.");
+        lgu_warn_msg("Failed to format error output.");
     }
     else {
-        lgu_warn_msg(t_sMsg);
+        lgu_warn_msg(out_msg);
     }
 }
 
-void lgu_warn_msg_str(const char *p_sMsgFormat, const char *p_sPut) {
-    static const int t_nMaxMsgSize = 300;
-    char t_sMsg[t_nMaxMsgSize];
+void lgu_warn_msg_str(char const* msg_format, char const* str_input) {
+    static const int max_msg_size = 300;
+    char out_msg[max_msg_size];
 
-    int t_nFormatRtn = snprintf(t_sMsg, t_nMaxMsgSize, p_sMsgFormat, p_sPut);
-    if ((t_nFormatRtn == 0) || (t_nFormatRtn >= t_nMaxMsgSize)) {
+    int format_rtn = snprintf(out_msg, max_msg_size, msg_format, str_input);
+    if ((format_rtn == 0) || (format_rtn >= max_msg_size)) {
         // failed to format the message
-        lgu_warn_msg("encountered an error, but failed to format output.");
+        lgu_warn_msg("Failed to format error output.");
     }
     else {
-        lgu_warn_msg(t_sMsg);
+        lgu_warn_msg(out_msg);
     }
 }
 #else
-/*
- * Ignore the message
- */
-void lgu_warn_msg(__attribute__((unused))const char* p_sMsg) {}
-void lgu_warn_msg_int(__attribute__((unused))const char* p_sMsgFormat, __attribute__((unused))const int p_nPut) {}
-void lgu_warn_msg_str(__attribute__((unused))const char* p_sMsgFormat, __attribute__((unused))const char *p_sPut) {}
-#endif
+/* ignore the message */
+void lgu_warn_msg(__attribute__((unused))char const* msg) {}
+void lgu_warn_msg_int(__attribute__((unused))char const* format, __attribute__((unused))const int input_int) {}
+void lgu_warn_msg_str(__attribute__((unused))char const* format, __attribute__((unused))char const* input_str) {}
+#endif // CLOGGER_VERBOSE_WARNING
 
+__MALORGITH_NAMESPACE_CLOSE

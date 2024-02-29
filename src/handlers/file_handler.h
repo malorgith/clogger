@@ -1,17 +1,17 @@
-
 #ifndef FILE_HANDLER_H_INCLUDED
 #define FILE_HANDLER_H_INCLUDED
 
 #ifdef __cplusplus
-extern "C" {
-#endif
+#pragma once
+#endif  // __cplusplus
 
-#include "../logger_handler.h"
+#include "logger_defines.h"
+#include "logger_handler.h"
 
-int create_file_handler(log_handler *p_pHandler, const char* p_sLogLocation, const char* p_sLogName);
+__MALORGITH_NAMESPACE_OPEN
 
-#ifdef __cplusplus
-}
-#endif
+int create_file_handler(log_handler *p_pHandler, char const* log_location_str, char const* log_name_str);
 
-#endif
+__MALORGITH_NAMESPACE_CLOSE
+
+#endif  // FILE_HANDLER_H_INCLUDED

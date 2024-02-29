@@ -5,39 +5,43 @@
 #include <pthread.h>
 #include <unistd.h>
 
+#ifdef __cplusplus
+using namespace ::malorgith::clogger;
+#endif  // __cplusplus
+
 typedef struct {
-    int m_nThreadNum;
-    int m_nMessages;
+    int thread_num;
+    int messages_to_log;
 } stressTestStruct;
 
-static void *stress_test_logger(void *p_pData) {
+static void *stress_test_logger(void *thread_data) {
 
-    stressTestStruct *my_params = (stressTestStruct*) p_pData;
-    int t_nThread = (*my_params).m_nThreadNum;
+    stressTestStruct *my_params = (stressTestStruct*) thread_data;
+    int local_thread_num = (*my_params).thread_num;
     char tmp_id[50];
-    logger_id id = 0;
-    int snprintf_rtn = snprintf(tmp_id, 50, "Thread %d", t_nThread);
+    logid_t id = 0;
+    int snprintf_rtn = snprintf(tmp_id, 50, "Thread %d", local_thread_num);
     if ((snprintf_rtn >= 50) || (snprintf_rtn < 0)) {
         fprintf(stderr, "Failed to create string for thread ID.\n");
     }
     else {
         id = logger_create_id(tmp_id);
-        if (id == CLOGGER_MAX_NUM_IDS) {
-            fprintf(stderr, "Thread %d failed to get a logger_id\n", t_nThread);
+        if (id == kCloggerMaxNumIds) {
+            fprintf(stderr, "Thread %d failed to get a logid_t\n", local_thread_num);
             return NULL;
         }
     }
-    int t_nMaxMessages = (*my_params).m_nMessages;
+    int max_messages = (*my_params).messages_to_log;
 
-    for (int t_nCount = 0; t_nCount < t_nMaxMessages; t_nCount++) {
+    for (int count = 0; count < max_messages; count++) {
         char msg[80];
-        sprintf(msg, "Message Number %d", t_nCount);
+        sprintf(msg, "Message Number %d", count);
         // TODO adjust sleep time or make variable?
-        struct timespec t_sleeptime = { 0, (long)10000000 };
-        nanosleep(&t_sleeptime, NULL);
+        struct timespec sleep_time = { 0, (long)10000000 };
+        nanosleep(&sleep_time, NULL);
 
-        if (logger_log_msg_id(LOGGER_INFO, id, msg)) {
-            printf("Thread %d: Got my first failure at message number %d\n", t_nThread, t_nCount);
+        if (logger_log_msg_id(kCloggerInfo, id, msg)) {
+            printf("Thread %d: Got my first failure at message number %d\n", local_thread_num, count);
             fflush(stdout);
             sleep(1);
             return NULL;
@@ -48,7 +52,7 @@ static void *stress_test_logger(void *p_pData) {
     return NULL;
 }
 
-static bool logger_run_stress_test(int p_nThreads, int p_nMessages) {
+static bool logger_run_stress_test(int num_threads, int num_messages) {
 
     if (!logger_is_running()) {
         fprintf(stderr, "Must initialize the logger and add handlers before running the stress test.\n");
@@ -58,19 +62,19 @@ static bool logger_run_stress_test(int p_nThreads, int p_nMessages) {
     printf("\nLogger Stress Test Starting\n");
     printf("===========================\n\n");
 
-    pthread_t t_logTestThreads[p_nThreads];
-    stressTestStruct t_Structs[p_nThreads];
-    for (int t_nCount = 0; t_nCount < p_nThreads; t_nCount++) {
+    pthread_t test_threads[num_threads];
+    stressTestStruct test_structs[num_threads];
+    for (int count = 0; count < num_threads; count++) {
 
-        stressTestStruct *my_struct = &t_Structs[t_nCount];
-        my_struct->m_nThreadNum = t_nCount;
-        my_struct->m_nMessages = p_nMessages;
+        stressTestStruct *my_struct = &test_structs[count];
+        my_struct->thread_num = count;
+        my_struct->messages_to_log = num_messages;
 
-        pthread_create(&t_logTestThreads[t_nCount], NULL, stress_test_logger, my_struct);
+        pthread_create(&test_threads[count], NULL, stress_test_logger, my_struct);
     }
 
-    for (int t_nCount = 0; t_nCount < p_nThreads; t_nCount++) {
-        pthread_join(t_logTestThreads[t_nCount], NULL);
+    for (int count = 0; count < num_threads; count++) {
+        pthread_join(test_threads[count], NULL);
     }
 
     printf("\nLogger Stress Test Completed\n");
@@ -81,17 +85,18 @@ static bool logger_run_stress_test(int p_nThreads, int p_nMessages) {
 
 int main(__attribute__((unused))int argc, __attribute__((unused))char** argv) {
 
-    if(logger_init(LOGGER_DEBUG)) {
+    if(logger_init(kCloggerDebug)) {
         fprintf(stderr, "Failed to initialize logger.\n");
         return 1;
     }
-    t_handlerref t_refConsoleHandler = logger_create_console_handler(stdout);
-    if (t_refConsoleHandler == CLOGGER_HANDLER_ERR) {
+    loghandler_t console_handler = logger_create_console_handler(stdout);
+    if (console_handler == kCloggerHandlerErr) {
         fprintf(stderr, "Failed to add console handler to logger.\n");
         logger_free();
         return 1;
     }
     logger_run_stress_test(5, 25);
+
     if (logger_free()) {
         fprintf(stderr, "Failed to stop logger.\n");
         return 1;

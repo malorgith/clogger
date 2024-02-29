@@ -1,84 +1,121 @@
-
-#ifndef LOGGER_ID_H_INCLUDED
-#define LOGGER_ID_H_INCLUDED
+#ifndef MALORGITH_CLOGGER_ID_H_
+#define MALORGITH_CLOGGER_ID_H_
 
 #ifdef __cplusplus
-extern "C" {
-#endif
+#pragma once
+#endif  // __cplusplus
 
-#include "clogger.h"
+//#include "clogger.h"
+#include "logger_defines.h"
+#include __MALORGITH_CLOGGER_INCLUDE
+
+__MALORGITH_NAMESPACE_OPEN
 
 /*
- * Initializes global variables.
+ * @brief Initialize log ID globals.
  *
- * Returns 0 on success, non-zero on failure.
+ * @returns 0 on success, non-zero on failure
  */
 int lgi_init();
 
 /*
- * Frees all id data.
+ * @brief Free log ID globals.
  *
- * Returns 0 on success, non-zero on failure.
+ * @returns 0 on success, non-zero on failure
  */
 int lgi_free();
 
 /*
- * Creates a new id.
+ * @brief Create a new log ID.
  *
- * Returns a logger_id reference to the new id on success,
- * CLOGGER_MAX_NUM_IDS on failure.
+ * @returns a logid_t reference to the new ID on success, CLOGGER_MAX_NUM_IDS
+ * on failure
  */
-logger_id lgi_add_id(const char* p_sId);
+logid_t lgi_add_id(
+    /*! the value of the ID */
+    char const* str_id
+);
 
 /*
- * Creates a new id with the specified handlers.
+ * @brief Create a new ID with the specified handlers.
  *
- * Returns a logger_id reference to the new id on success,
- * CLOGGER_MAX_NUM_IDS on failure.
+ * @returns a logid_t reference to the new ID on success, CLOGGER_MAX_NUM_IDS
+ * on failure
  */
-logger_id lgi_add_id_w_handler(const char* p_sId, t_handlerref p_refHandlers);
+logid_t lgi_add_id_w_handler(
+    /*! the name of the ID to create */
+    char const* str_id,
+    /*! the handler(s) to assign to the ID */
+    loghandler_t p_refHandlers
+);
 
 /*
- * Add a new handler to the specified logger_id
- */
-int lgi_add_handler(logger_id, t_handlerref);
-
-/*
- * Increments the message count for the id at the specified reference.
+ * @brief Add a handler to the specified logid_t.
  *
- * Returns 0 on success, non-zero on failure.
+ * @returns 0 on success, non-zero on failure
  */
-int lgi_add_message(logger_id);
+int lgi_add_handler(
+    /*! the ID to add the handler(s) to */
+    logid_t,
+    /*! the handler(s) to add */
+    loghandler_t
+);
 
 /*
- * Stores the value of the log id at the specified reference in dest.
+ * @brief Increment the message count for the specified logid_t.
  *
- * Returns a t_handlerref that represents the handlers that should
- * be written to on success, and CLOGGER_HANDLER_ERR on error.
+ * @returns 0 on success, non-zero on failure
  */
-t_handlerref lgi_get_id(logger_id p_refId, char* dest);
+int lgi_add_message(
+    /*! the ID to add a message to */
+    logid_t
+);
 
 /*
- * Removes a handler from the specified logger_id
- */
-int lgi_remove_handler(logger_id, t_handlerref);
-
-/*
- * Removes the log id at the specified reference.
+ * @brief Store the value of the specified logid_t in the destination.
  *
- * Returns 0 on success, non-zero on failure.
+ * @returns a loghandler_t that represents the handlers that should be written
+ * to on success, kCloggerHandlerErr on error
  */
-int lgi_remove_id(logger_id p_refId);
+loghandler_t lgi_get_id(
+    /*! the ID to fetch the value of */
+    logid_t id_index,
+    /*! the location to store the ID value */
+    char* dest
+);
 
 /*
- * Decreases the message count for the id at the specified reference.
+ * @brief Remove a handler from the specified logid_t.
  *
- * Returns 0 on success, non-zero on failure.
+ * @returns 0 on success, non-zero on failure
  */
-int lgi_remove_message(logger_id);
+int lgi_remove_handler(
+    /*! the ID to remove the handler(s) from */
+    logid_t,
+    /*! the handler(s) to remove */
+    loghandler_t
+);
 
-#ifdef __cplusplus
-}
-#endif
+/*
+ * @brief Remove the specified logid_t.
+ *
+ * @returns 0 on success, non-zero on failure
+ */
+int lgi_remove_id(
+    /*! the ID to remove */
+    logid_t id_index
+);
 
-#endif
+/*
+ * @brief Decrease the message count for the specified logid_t.
+ *
+ * @returns 0 on success, non-zero on failure
+ */
+int lgi_remove_message(
+    /*! the ID to remove the message from */
+    logid_t
+);
+
+__MALORGITH_NAMESPACE_CLOSE
+
+#endif  // MALORGITH_CLOGGER_ID_H_

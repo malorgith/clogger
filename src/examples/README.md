@@ -11,7 +11,7 @@ Demonstrates the basic features of the library and how to start logging.
 * Binary name: `clogger_example_simple`
 
 # stress_test.c
-Creates multiple threads that each create a `logger_id` and send multiple messages
+Creates multiple threads that each create a `logid_t` and send multiple messages
 to the logger. Intended to test the performance of the logger.
 * Build option: `CLOGGER_BUILD_EXAMPLE_STRESS`
 * Binary name: `clogger_example_stress`
